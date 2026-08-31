@@ -662,23 +662,23 @@ xmlns:m=
     )
 
 
-if error is not None:
+    if error is not None:
 
-    mensaje_error = (
-        error.text or ""
-    ).strip()
+        mensaje_error = (
+            error.text or ""
+        ).strip()
 
-    # RNDC11 significa que la consulta fue procesada,
-    # pero no se encontraron documentos para los filtros.
-    if (
-        "RNDC11" in mensaje_error
-        and "Documento no encontrado" in mensaje_error
-    ):
-        return pd.DataFrame()
+        # RNDC11 significa que la consulta fue procesada,
+        # pero no se encontraron documentos para los filtros.
+        if (
+            "RNDC11" in mensaje_error
+            and "Documento no encontrado" in mensaje_error
+        ):
+            return pd.DataFrame()
 
-    raise Exception(
-        mensaje_error
-    )
+        raise Exception(
+            mensaje_error
+        )
 
 
     # =============================================================
