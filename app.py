@@ -879,7 +879,7 @@ st.title(
 
 
 st.write(
-    "Consulta los manifiestos"
+    "Decarga manifiestos"
 )
 
 
