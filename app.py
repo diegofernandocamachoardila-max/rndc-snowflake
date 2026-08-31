@@ -879,8 +879,7 @@ st.title(
 
 
 st.write(
-    "Consulta los manifiestos del Proceso 4 "
-    "y cárgalos automáticamente a Snowflake."
+    "Consulta los manifiestos"
 )
 
 
