@@ -3,9 +3,10 @@ import requests
 import pandas as pd
 import xml.etree.ElementTree as ET
 import snowflake.connector
-from snowflake.connector.pandas_tools import write_pandas
 
+from snowflake.connector.pandas_tools import write_pandas
 from xml.sax.saxutils import escape
+from datetime import timedelta
 
 
 # =============================================================================
@@ -54,13 +55,689 @@ SNOWFLAKE_TABLE = "MANIFIESTOS_PROCESO4"
 
 
 # =============================================================================
-# URLs RNDC
+# VALIDAR SECRETS
+# =============================================================================
+
+SECRETS_REQUERIDOS = [
+    "RNDC_USERNAME",
+    "RNDC_PASSWORD",
+    "NIT_EMPRESA",
+    "SNOWFLAKE_ACCOUNT",
+    "SNOWFLAKE_USER",
+    "SNOWFLAKE_PASSWORD",
+    "SNOWFLAKE_ROLE",
+    "SNOWFLAKE_WAREHOUSE",
+    "SNOWFLAKE_DATABASE",
+    "SNOWFLAKE_SCHEMA"
+]
+
+
+def validar_secrets():
+
+    faltantes = []
+
+    for nombre in SECRETS_REQUERIDOS:
+
+        if not obtener_secret(nombre):
+
+            faltantes.append(nombre)
+
+    if faltantes:
+
+        raise Exception(
+            "Faltan los siguientes Secrets en Streamlit: "
+            + ", ".join(faltantes)
+        )
+
+
+# =============================================================================
+# URL RNDC
 # =============================================================================
 
 URL_RNDC = (
     "http://plc.mintransporte.gov.co:8080/"
     "soap/IBPMServices"
 )
+
+
+HEADERS_RNDC = {
+    "Content-Type": "text/xml; charset=ISO-8859-1"
+}
+
+
+# =============================================================================
+# FUNCIÓN GENERAL PARA ENVIAR CONSULTAS A RNDC
+# =============================================================================
+
+def enviar_rndc(body):
+
+    xml_request = f"""<?xml version='1.0' encoding='ISO-8859-1'?>
+
+<SOAP-ENV:Envelope
+xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+
+<SOAP-ENV:Body>
+
+<m:AtenderMensajeRNDC
+xmlns:m="urn:BPMServicesIntf-IBPMServices">
+
+<Request xsi:type="xsd:string">{escape(body)}</Request>
+
+</m:AtenderMensajeRNDC>
+
+</SOAP-ENV:Body>
+
+</SOAP-ENV:Envelope>"""
+
+    response = requests.post(
+
+        URL_RNDC,
+
+        data=xml_request.encode(
+            "ISO-8859-1"
+        ),
+
+        headers=HEADERS_RNDC,
+
+        timeout=120
+    )
+
+    response.raise_for_status()
+
+
+    # =========================================================================
+    # PROCESAR RESPUESTA SOAP
+    # =========================================================================
+
+    root = ET.fromstring(
+        response.text
+    )
+
+
+    # Buscar cualquier nodo llamado return
+    nodo_return = None
+
+    for elemento in root.iter():
+
+        if elemento.tag.split("}")[-1] == "return":
+
+            nodo_return = elemento
+            break
+
+
+    if nodo_return is None:
+
+        return None
+
+
+    return nodo_return.text
+
+
+# =============================================================================
+# PROCESO 6
+#
+# BUSCAR MANIFIESTOS POR RANGO DE FECHAS
+# =============================================================================
+
+def consultar_proceso6(
+    fecha_inicio,
+    fecha_fin
+):
+
+    inicio = fecha_inicio.strftime(
+        "%Y/%m/%d"
+    )
+
+    fin = fecha_fin.strftime(
+        "%Y/%m/%d"
+    )
+
+
+    body = f"""<root>
+
+<acceso>
+<username>{RNDC_USERNAME}</username>
+<password>{RNDC_PASSWORD}</password>
+</acceso>
+
+<solicitud>
+<tipo>3</tipo>
+<procesoid>6</procesoid>
+</solicitud>
+
+<variables>
+INGRESOID,FECHAING,NUMMANIFIESTOCARGA
+</variables>
+
+<documento>
+
+<NUMNITEMPRESATRANSPORTE>
+{NIT_EMPRESA}
+</NUMNITEMPRESATRANSPORTE>
+
+</documento>
+
+<documentorango>
+
+<iniFECHAING>'{inicio}'</iniFECHAING>
+
+<finFECHAING>'{fin}'</finFECHAING>
+
+</documentorango>
+
+</root>"""
+
+
+    contenido = enviar_rndc(
+        body
+    )
+
+
+    if not contenido:
+
+        return []
+
+
+    root = ET.fromstring(
+        contenido.strip()
+    )
+
+
+    # =========================================================================
+    # VALIDAR ERROR RNDC
+    # =========================================================================
+
+    error = root.find(
+        ".//ErrorMSG"
+    )
+
+
+    if error is not None:
+
+        mensaje = error.text or "Error desconocido RNDC"
+
+        raise Exception(
+            f"Error RNDC Proceso 6: {mensaje}"
+        )
+
+
+    # =========================================================================
+    # EXTRAER DOCUMENTOS
+    # =========================================================================
+
+    registros = []
+
+
+    documentos = root.findall(
+        ".//documento"
+    )
+
+
+    for documento in documentos:
+
+        registro = {}
+
+
+        for campo in documento:
+
+            nombre = (
+                campo.tag
+                .split("}")[-1]
+            )
+
+            registro[nombre] = (
+                campo.text.strip()
+                if campo.text
+                else None
+            )
+
+
+        registros.append(
+            registro
+        )
+
+
+    return registros
+
+
+# =============================================================================
+# VARIABLES DEL PROCESO 4
+#
+# CAMPOS QUE VAMOS A DESCARGAR
+# =============================================================================
+
+VARIABLES_PROCESO4 = """
+INGRESOID,
+NUMMANIFIESTOCARGA,
+FECHAING,
+NUMPLACA,
+NUMPLACAREMOLQUE,
+VALORFLETEPACTADOVIAJE,
+FECHAEXPEDICIONMANIFIESTO,
+CODOPERACIONTRANSPORTE,
+CONSECUTIVOINFORMACIONVIAJE,
+MANNROMANIFIESTOTRANSBORDO,
+CODMUNICIPIOORIGENMANIFIESTO,
+CODMUNICIPIODESTINOMANIFIESTO,
+CODIDTITULARMANIFIESTO,
+NUMIDTITULARMANIFIESTO,
+CODIDCONDUCTOR,
+NUMIDCONDUCTOR,
+CODIDCONDUCTOR2,
+NUMIDCONDUCTOR2,
+RETENCIONFUENTEMANIFIESTO,
+RETENCIONICAMANIFIESTOCARGA,
+VALORANTICIPOMANIFIESTO,
+CODMUNICIPIOPAGOSALDO,
+FECHAPAGOSALDOMANIFIESTO,
+CODRESPONSABLEPAGOCARGUE,
+CODRESPONSABLEPAGODESCARGUE,
+NITMONITOREOFLOTA,
+ACEPTACIONELECTRONICA,
+OBSERVACIONES,
+CODVIA,
+SEGURIDADQR
+"""
+
+
+# =============================================================================
+# PROCESO 4
+#
+# CONSULTAR DETALLE DE UN MANIFIESTO
+# =============================================================================
+
+def consultar_proceso4(
+    numero_manifiesto
+):
+
+    body = f"""<root>
+
+<acceso>
+<username>{RNDC_USERNAME}</username>
+<password>{RNDC_PASSWORD}</password>
+</acceso>
+
+<solicitud>
+<tipo>3</tipo>
+<procesoid>4</procesoid>
+</solicitud>
+
+<variables>
+{VARIABLES_PROCESO4}
+</variables>
+
+<documento>
+
+<NUMNITEMPRESATRANSPORTE>
+{NIT_EMPRESA}
+</NUMNITEMPRESATRANSPORTE>
+
+<NUMMANIFIESTOCARGA>
+{numero_manifiesto}
+</NUMMANIFIESTOCARGA>
+
+</documento>
+
+</root>"""
+
+
+    contenido = enviar_rndc(
+        body
+    )
+
+
+    if not contenido:
+
+        return None
+
+
+    root = ET.fromstring(
+        contenido.strip()
+    )
+
+
+    # =========================================================================
+    # VALIDAR ERROR RNDC
+    # =========================================================================
+
+    error = root.find(
+        ".//ErrorMSG"
+    )
+
+
+    if error is not None:
+
+        return None
+
+
+    # =========================================================================
+    # BUSCAR DOCUMENTO
+    # =========================================================================
+
+    documento = root.find(
+        ".//documento"
+    )
+
+
+    if documento is None:
+
+        return None
+
+
+    registro = {}
+
+
+    for campo in documento:
+
+        nombre = (
+            campo.tag
+            .split("}")[-1]
+        )
+
+
+        registro[nombre] = (
+
+            campo.text.strip()
+
+            if campo.text
+
+            else None
+
+        )
+
+
+    return registro
+
+
+# =============================================================================
+# CONSULTAR RNDC COMPLETO
+#
+# PASO 1 → PROCESO 6 POR FECHA
+# PASO 2 → PROCESO 4 POR CADA MANIFIESTO
+# =============================================================================
+
+def consultar_rndc(
+    fecha_inicio,
+    fecha_fin
+):
+
+
+    # =========================================================================
+    # PASO 1
+    #
+    # CONSULTAR PROCESO 6 EN BLOQUES DE 5 DÍAS
+    # =========================================================================
+
+    todos_los_registros = []
+
+
+    fecha_actual = fecha_inicio
+
+
+    while fecha_actual <= fecha_fin:
+
+
+        fecha_bloque_fin = min(
+
+            fecha_actual + timedelta(days=4),
+
+            fecha_fin
+
+        )
+
+
+        registros_bloque = (
+
+            consultar_proceso6(
+
+                fecha_actual,
+
+                fecha_bloque_fin
+
+            )
+
+        )
+
+
+        todos_los_registros.extend(
+
+            registros_bloque
+
+        )
+
+
+        fecha_actual = (
+
+            fecha_bloque_fin
+
+            +
+
+            timedelta(days=1)
+
+        )
+
+
+    # =========================================================================
+    # VALIDAR RESULTADO PROCESO 6
+    # =========================================================================
+
+    if not todos_los_registros:
+
+        return pd.DataFrame()
+
+
+    dataframe_proceso6 = (
+
+        pd.DataFrame(
+
+            todos_los_registros
+
+        )
+
+    )
+
+
+    # =========================================================================
+    # BUSCAR COLUMNA NUMMANIFIESTOCARGA
+    # =========================================================================
+
+    columna_manifiesto = None
+
+
+    for columna in dataframe_proceso6.columns:
+
+
+        if columna.upper() == "NUMMANIFIESTOCARGA":
+
+
+            columna_manifiesto = columna
+
+            break
+
+
+    if columna_manifiesto is None:
+
+
+        raise Exception(
+
+            "El Proceso 6 no devolvió "
+            "la columna NUMMANIFIESTOCARGA."
+
+        )
+
+
+    # =========================================================================
+    # EXTRAER MANIFIESTOS ÚNICOS
+    # =========================================================================
+
+    manifiestos = (
+
+        dataframe_proceso6[
+
+            columna_manifiesto
+
+        ]
+
+        .dropna()
+
+        .astype(str)
+
+        .str.strip()
+
+        .loc[lambda serie: serie != ""]
+
+        .drop_duplicates()
+
+        .tolist()
+
+    )
+
+
+    if not manifiestos:
+
+
+        return pd.DataFrame()
+
+
+    # =========================================================================
+    # PASO 2
+    #
+    # CONSULTAR PROCESO 4 PARA CADA MANIFIESTO
+    # =========================================================================
+
+    resultados = []
+
+
+    total = len(
+
+        manifiestos
+
+    )
+
+
+    barra_progreso = (
+
+        st.progress(
+
+            0,
+
+            text=(
+                "Consultando detalles "
+                "de los manifiestos..."
+            )
+
+        )
+
+    )
+
+
+    estado = st.empty()
+
+
+    for posicion, numero_manifiesto in enumerate(
+
+        manifiestos,
+
+        start=1
+
+    ):
+
+
+        estado.write(
+
+            f"Consultando manifiesto "
+
+            f"{posicion:,} de {total:,}"
+
+        )
+
+
+        try:
+
+
+            detalle = (
+
+                consultar_proceso4(
+
+                    numero_manifiesto
+
+                )
+
+            )
+
+
+            if detalle is not None:
+
+
+                resultados.append(
+
+                    detalle
+
+                )
+
+
+        except Exception:
+
+            # Si un manifiesto individual falla,
+            # continuamos con los demás
+            pass
+
+
+        progreso = (
+
+            int(
+
+                posicion
+
+                /
+
+                total
+
+                *
+
+                100
+
+            )
+
+        )
+
+
+        barra_progreso.progress(
+
+            progreso,
+
+            text=(
+
+                f"Consultando manifiesto "
+
+                f"{posicion:,} de {total:,}"
+
+            )
+
+        )
+
+
+    estado.empty()
+
+
+    # =========================================================================
+    # RESULTADO FINAL
+    # =========================================================================
+
+    dataframe_final = (
+
+        pd.DataFrame(
+
+            resultados
+
+        )
+
+    )
+
+
+    return dataframe_final
 
 
 # =============================================================================
@@ -84,36 +761,53 @@ def conectar_snowflake():
         database=SNOWFLAKE_DATABASE,
 
         schema=SNOWFLAKE_SCHEMA
+
     )
+
 
     return conexion
 
 
 # =============================================================================
-# CREAR / ACTUALIZAR TABLA
+# CREAR / ACTUALIZAR TABLA EN SNOWFLAKE
 # =============================================================================
 
-def preparar_tabla_snowflake(conexion, dataframe):
+def preparar_tabla_snowflake(
+
+    conexion,
+
+    dataframe
+
+):
+
 
     cursor = conexion.cursor()
 
+
     try:
+
+
+        # =====================================================================
+        # CREAR TABLA SI NO EXISTE
+        # =====================================================================
 
         columnas_sql = []
 
+
         for columna in dataframe.columns:
 
+
             columnas_sql.append(
+
                 f'"{columna}" VARCHAR'
+
             )
 
 
         sql_crear_tabla = f"""
 
         CREATE TABLE IF NOT EXISTS
-        {SNOWFLAKE_DATABASE}.
-        {SNOWFLAKE_SCHEMA}.
-        {SNOWFLAKE_TABLE}
+        {SNOWFLAKE_DATABASE}.{SNOWFLAKE_SCHEMA}.{SNOWFLAKE_TABLE}
 
         (
             {", ".join(columnas_sql)}
@@ -121,12 +815,17 @@ def preparar_tabla_snowflake(conexion, dataframe):
 
         """
 
-        cursor.execute(sql_crear_tabla)
+
+        cursor.execute(
+
+            sql_crear_tabla
+
+        )
 
 
-        # -------------------------------------------------------------
+        # =====================================================================
         # CONSULTAR COLUMNAS EXISTENTES
-        # -------------------------------------------------------------
+        # =====================================================================
 
         sql_columnas = f"""
 
@@ -142,7 +841,11 @@ def preparar_tabla_snowflake(conexion, dataframe):
         """
 
 
-        cursor.execute(sql_columnas)
+        cursor.execute(
+
+            sql_columnas
+
+        )
 
 
         columnas_existentes = {
@@ -154,35 +857,40 @@ def preparar_tabla_snowflake(conexion, dataframe):
         }
 
 
-        # -------------------------------------------------------------
-        # AGREGAR COLUMNAS NUEVAS
-        # -------------------------------------------------------------
+        # =====================================================================
+        # AGREGAR NUEVAS COLUMNAS
+        # =====================================================================
 
         columnas_agregadas = []
 
 
         for columna in dataframe.columns:
 
+
             if columna.upper() not in columnas_existentes:
+
 
                 sql_agregar_columna = f"""
 
                 ALTER TABLE
-
-                {SNOWFLAKE_DATABASE}.
-                {SNOWFLAKE_SCHEMA}.
-                {SNOWFLAKE_TABLE}
+                {SNOWFLAKE_DATABASE}.{SNOWFLAKE_SCHEMA}.{SNOWFLAKE_TABLE}
 
                 ADD COLUMN "{columna}" VARCHAR
 
                 """
 
+
                 cursor.execute(
+
                     sql_agregar_columna
+
                 )
 
+
                 columnas_agregadas.append(
+
                     columna
+
                 )
 
 
@@ -190,6 +898,7 @@ def preparar_tabla_snowflake(conexion, dataframe):
 
 
     finally:
+
 
         cursor.close()
 
@@ -199,9 +908,13 @@ def preparar_tabla_snowflake(conexion, dataframe):
 # =============================================================================
 
 def eliminar_registros_existentes(
+
     conexion,
+
     dataframe
+
 ):
+
 
     if dataframe.empty:
 
@@ -217,6 +930,7 @@ def eliminar_registros_existentes(
 
 
     try:
+
 
         ingresos_ids = (
 
@@ -252,10 +966,17 @@ def eliminar_registros_existentes(
         ):
 
 
-            lote = ingresos_ids[
-                inicio:
-                inicio + tamanio_lote
-            ]
+            lote = (
+
+                ingresos_ids[
+
+                    inicio:
+
+                    inicio + tamanio_lote
+
+                ]
+
+            )
 
 
             valores_sql_lista = []
@@ -263,13 +984,18 @@ def eliminar_registros_existentes(
 
             for valor in lote:
 
-                valor_limpio = str(
-                    valor
-                ).replace(
 
-                    "'",
+                valor_limpio = (
 
-                    "''"
+                    str(valor)
+
+                    .replace(
+
+                        "'",
+
+                        "''"
+
+                    )
 
                 )
 
@@ -281,18 +1007,21 @@ def eliminar_registros_existentes(
                 )
 
 
-            valores_sql = ", ".join(
-                valores_sql_lista
+            valores_sql = (
+
+                ", ".join(
+
+                    valores_sql_lista
+
+                )
+
             )
 
 
             sql_delete = f"""
 
             DELETE FROM
-
-            {SNOWFLAKE_DATABASE}.
-            {SNOWFLAKE_SCHEMA}.
-            {SNOWFLAKE_TABLE}
+            {SNOWFLAKE_DATABASE}.{SNOWFLAKE_SCHEMA}.{SNOWFLAKE_TABLE}
 
             WHERE "INGRESOID" IN
             (
@@ -303,11 +1032,14 @@ def eliminar_registros_existentes(
 
 
             cursor.execute(
+
                 sql_delete
+
             )
 
 
     finally:
+
 
         cursor.close()
 
@@ -316,46 +1048,61 @@ def eliminar_registros_existentes(
 # CARGAR DATAFRAME A SNOWFLAKE
 # =============================================================================
 
-def cargar_dataframe_snowflake(dataframe):
+def cargar_dataframe_snowflake(
+
+    dataframe
+
+):
+
 
     conexion = None
 
 
     try:
 
+
         if dataframe.empty:
 
+
             raise Exception(
+
                 "No hay registros para cargar."
+
             )
 
 
-        # -------------------------------------------------------------
-        # COPIA DEL DATAFRAME
-        # -------------------------------------------------------------
+        # =====================================================================
+        # COPIA
+        # =====================================================================
 
-        df_snowflake = dataframe.copy()
+        df_snowflake = (
+
+            dataframe.copy()
+
+        )
 
 
-        # -------------------------------------------------------------
-        # COLUMNAS EN MAYÚSCULAS
-        # -------------------------------------------------------------
+        # =====================================================================
+        # MAYÚSCULAS
+        # =====================================================================
 
         df_snowflake.columns = [
 
             str(columna).upper()
 
             for columna
+
             in df_snowflake.columns
 
         ]
 
 
-        # -------------------------------------------------------------
+        # =====================================================================
         # CONVERTIR TODO A STRING
-        # -------------------------------------------------------------
+        # =====================================================================
 
         for columna in df_snowflake.columns:
+
 
             df_snowflake[columna] = (
 
@@ -366,18 +1113,23 @@ def cargar_dataframe_snowflake(dataframe):
             )
 
 
-        # -------------------------------------------------------------
+        # =====================================================================
         # CONECTAR
-        # -------------------------------------------------------------
+        # =====================================================================
 
-        conexion = conectar_snowflake()
+        conexion = (
+
+            conectar_snowflake()
+
+        )
 
 
-        # -------------------------------------------------------------
+        # =====================================================================
         # PREPARAR TABLA
-        # -------------------------------------------------------------
+        # =====================================================================
 
         columnas_agregadas = (
+
             preparar_tabla_snowflake(
 
                 conexion,
@@ -385,12 +1137,13 @@ def cargar_dataframe_snowflake(dataframe):
                 df_snowflake
 
             )
+
         )
 
 
-        # -------------------------------------------------------------
+        # =====================================================================
         # ELIMINAR DUPLICADOS EXISTENTES
-        # -------------------------------------------------------------
+        # =====================================================================
 
         eliminar_registros_existentes(
 
@@ -401,36 +1154,43 @@ def cargar_dataframe_snowflake(dataframe):
         )
 
 
-        # -------------------------------------------------------------
-        # CARGAR DATAFRAME
-        # -------------------------------------------------------------
+        # =====================================================================
+        # CARGAR
+        # =====================================================================
 
-        success, chunks, rows, output = write_pandas(
+        success, chunks, rows, output = (
 
-            conn=conexion,
+            write_pandas(
 
-            df=df_snowflake,
+                conn=conexion,
 
-            table_name=SNOWFLAKE_TABLE,
+                df=df_snowflake,
 
-            database=SNOWFLAKE_DATABASE,
+                table_name=SNOWFLAKE_TABLE,
 
-            schema=SNOWFLAKE_SCHEMA,
+                database=SNOWFLAKE_DATABASE,
 
-            quote_identifiers=True,
+                schema=SNOWFLAKE_SCHEMA,
 
-            auto_create_table=False,
+                quote_identifiers=True,
 
-            overwrite=False
+                auto_create_table=False,
+
+                overwrite=False
+
+            )
 
         )
 
 
         if not success:
 
+
             raise Exception(
+
                 "Snowflake no confirmó "
                 "la carga de los registros."
+
             )
 
 
@@ -439,302 +1199,38 @@ def cargar_dataframe_snowflake(dataframe):
             "rows": rows,
 
             "columnas_agregadas":
-            columnas_agregadas
+
+                columnas_agregadas
 
         }
 
 
     finally:
 
+
         if conexion is not None:
 
+
             conexion.close()
-
-
-# =============================================================================
-# CONSULTAR RNDC
-# =============================================================================
-
-def consultar_rndc(
-
-    fecha_inicio,
-
-    fecha_fin
-
-):
-
-
-    # =============================================================
-    # TODOS LOS CAMPOS DEL PROCESO 4
-    # EXCEPTO CONSECUTIVOREMESA
-    # =============================================================
-
-    variables = """
-
-INGRESOID,
-NUMMANIFIESTOCARGA,
-FECHAING,
-NUMPLACA,
-NUMPLACAREMOLQUE,
-VALORFLETEPACTADOVIAJE,
-FECHAEXPEDICIONMANIFIESTO,
-CODOPERACIONTRANSPORTE,
-CONSECUTIVOINFORMACIONVIAJE,
-MANNROMANIFIESTOTRANSBORDO,
-CODMUNICIPIOORIGENMANIFIESTO,
-CODMUNICIPIODESTINOMANIFIESTO,
-CODIDTITULARMANIFIESTO,
-NUMIDTITULARMANIFIESTO,
-CODIDCONDUCTOR,
-NUMIDCONDUCTOR,
-CODIDCONDUCTOR2,
-NUMIDCONDUCTOR2,
-RETENCIONFUENTEMANIFIESTO,
-RETENCIONICAMANIFIESTOCARGA,
-VALORANTICIPOMANIFIESTO,
-CODMUNICIPIOPAGOSALDO,
-FECHAPAGOSALDOMANIFIESTO,
-CODRESPONSABLEPAGOCARGUE,
-CODRESPONSABLEPAGODESCARGUE,
-NITMONITOREOFLOTA,
-ACEPTACIONELECTRONICA,
-OBSERVACIONES,
-CODVIA,
-SEGURIDADQR
-
-"""
-
-
-    # =============================================================
-    # XML RNDC
-    # =============================================================
-
-    body = f"""<root>
-
-<acceso>
-<username>{RNDC_USERNAME}</username>
-<password>{RNDC_PASSWORD}</password>
-</acceso>
-
-<solicitud>
-<tipo>3</tipo>
-<procesoid>4</procesoid>
-</solicitud>
-
-<variables>
-{variables}
-</variables>
-
-<documento>
-<NUMNITEMPRESATRANSPORTE>
-{NIT_EMPRESA}
-</NUMNITEMPRESATRANSPORTE>
-</documento>
-
-<documentorango>
-
-<iniFECHAING>
-'{fecha_inicio}'
-</iniFECHAING>
-
-<finFECHAING>
-'{fecha_fin}'
-</finFECHAING>
-
-</documentorango>
-
-</root>"""
-
-
-    # =============================================================
-    # SOAP
-    # =============================================================
-
-    xml_request = f"""<?xml version='1.0' encoding='ISO-8859-1'?>
-
-<SOAP-ENV:Envelope
-
-xmlns:SOAP-ENV=
-"http://schemas.xmlsoap.org/soap/envelope/"
-
-xmlns:xsi=
-"http://www.w3.org/2001/XMLSchema-instance"
-
-xmlns:xsd=
-"http://www.w3.org/2001/XMLSchema-instance">
-
-<SOAP-ENV:Body>
-
-<m:AtenderMensajeRNDC
-
-xmlns:m=
-"urn:BPMServicesIntf-IBPMServices">
-
-<Request xsi:type="xsd:string">
-{escape(body)}
-</Request>
-
-</m:AtenderMensajeRNDC>
-
-</SOAP-ENV:Body>
-
-</SOAP-ENV:Envelope>"""
-
-
-    # =============================================================
-    # CONSULTAR
-    # =============================================================
-
-    response = requests.post(
-
-        URL_RNDC,
-
-        data=xml_request.encode(
-            "ISO-8859-1"
-        ),
-
-        headers={
-
-            "Content-Type":
-
-            "text/xml; charset=ISO-8859-1"
-
-        },
-
-        timeout=120
-
-    )
-
-
-    response.raise_for_status()
-
-
-    # =============================================================
-    # PROCESAR SOAP
-    # =============================================================
-
-    root = ET.fromstring(
-        response.text
-    )
-
-
-    fault = root.find(
-
-        ".//"
-        "{http://schemas.xmlsoap.org/soap/envelope/}"
-        "Fault"
-
-    )
-
-
-    if fault is not None:
-
-        raise Exception(
-            "SOAP Fault en RNDC"
-        )
-
-
-    nodo_return = root.find(
-        ".//return"
-    )
-
-
-    if nodo_return is None:
-
-        return pd.DataFrame()
-
-
-    contenido = nodo_return.text
-
-
-    if not contenido:
-
-        return pd.DataFrame()
-
-
-    root_rndc = ET.fromstring(
-        contenido.strip()
-    )
-
-
-    error = root_rndc.find(
-        ".//ErrorMSG"
-    )
-
-
-    if error is not None:
-
-        mensaje_error = (
-            error.text or ""
-        ).strip()
-
-        # RNDC11 significa que la consulta fue procesada,
-        # pero no se encontraron documentos para los filtros.
-        if (
-            "RNDC11" in mensaje_error
-            and "Documento no encontrado" in mensaje_error
-        ):
-            return pd.DataFrame()
-
-        raise Exception(
-            mensaje_error
-        )
-
-
-    # =============================================================
-    # EXTRAER DOCUMENTOS
-    # =============================================================
-
-    registros = []
-
-
-    documentos = root_rndc.findall(
-        ".//documento"
-    )
-
-
-    for doc in documentos:
-
-
-        registro = {}
-
-
-        for campo in doc:
-
-
-            nombre = (
-
-                campo.tag
-
-                .split("}")[-1]
-
-            )
-
-
-            registro[nombre] = (
-                campo.text
-            )
-
-
-        registros.append(
-            registro
-        )
-
-
-    return pd.DataFrame(
-        registros
-    )
 
 
 # =============================================================================
 # INTERFAZ
 # =============================================================================
 
-st.title("🚛 RNDC → Snowflake")
+st.title(
+
+    "🚛 RNDC → Snowflake"
+
+)
+
 
 st.write(
-    "Consulta los manifiestos del Proceso 4 "
-    "y cárgalos automáticamente a Snowflake."
+
+    "Consulta los manifiestos por fecha utilizando "
+    "el Proceso 6 y descarga automáticamente el detalle "
+    "de cada manifiesto con el Proceso 4."
+
 )
 
 
@@ -745,33 +1241,55 @@ st.divider()
 # FORMULARIO
 # =============================================================================
 
-columna1, columna2 = st.columns(2)
+columna1, columna2 = (
+
+    st.columns(2)
+
+)
 
 
 with columna1:
 
-    fecha_inicio = st.date_input(
-        "Fecha inicial"
+
+    fecha_inicio = (
+
+        st.date_input(
+
+            "Fecha inicial"
+
+        )
+
     )
 
 
 with columna2:
 
-    fecha_fin = st.date_input(
-        "Fecha final"
+
+    fecha_fin = (
+
+        st.date_input(
+
+            "Fecha final"
+
+        )
+
     )
 
 
 st.divider()
 
 
-boton_consultar = st.button(
+boton_consultar = (
 
-    "🚀 CONSULTAR Y CARGAR A SNOWFLAKE",
+    st.button(
 
-    type="primary",
+        "🚀 CONSULTAR Y CARGAR A SNOWFLAKE",
 
-    use_container_width=True
+        type="primary",
+
+        use_container_width=True
+
+    )
 
 )
 
@@ -785,85 +1303,94 @@ if boton_consultar:
 
     if fecha_fin < fecha_inicio:
 
+
         st.error(
+
             "❌ La fecha final no puede ser "
             "menor que la fecha inicial."
+
         )
+
 
         st.stop()
-
-
-    fecha_inicio_rndc = (
-        fecha_inicio.strftime(
-            "%Y/%m/%d"
-        )
-    )
-
-
-    fecha_fin_rndc = (
-        fecha_fin.strftime(
-            "%Y/%m/%d"
-        )
-    )
 
 
     try:
 
 
-        # =========================================================
-        # CONSULTA RNDC
-        # =========================================================
+        # =====================================================================
+        # VALIDAR SECRETS
+        # =====================================================================
+
+        validar_secrets()
+
+
+        # =====================================================================
+        # CONSULTAR RNDC
+        # =====================================================================
 
         with st.spinner(
-            "Consultando información en RNDC..."
+
+            "Paso 1: buscando números de manifiesto "
+            "en el Proceso 6..."
+
         ):
 
 
-            dataframe = consultar_rndc(
+            dataframe = (
 
-                fecha_inicio_rndc,
+                consultar_rndc(
 
-                fecha_fin_rndc
+                    fecha_inicio,
+
+                    fecha_fin
+
+                )
 
             )
 
 
-        # =========================================================
-        # VALIDAR
-        # =========================================================
+        # =====================================================================
+        # VALIDAR RESULTADO
+        # =====================================================================
 
         if dataframe.empty:
 
 
             st.warning(
+
                 "⚠️ No se encontraron registros "
                 "para el período seleccionado."
+
             )
 
 
         else:
 
 
-            # =====================================================
+            # =================================================================
             # MAYÚSCULAS
-            # =====================================================
+            # =================================================================
 
             dataframe.columns = [
 
-                columna.upper()
+                str(columna).upper()
 
                 for columna
+
                 in dataframe.columns
 
             ]
 
 
-            # =====================================================
-            # DUPLICADOS
-            # =====================================================
+            # =================================================================
+            # ELIMINAR DUPLICADOS
+            # =================================================================
 
-            registros_antes = len(
-                dataframe
+            registros_antes = (
+
+                len(dataframe)
+
             )
 
 
@@ -885,8 +1412,10 @@ if boton_consultar:
                 )
 
 
-            registros_finales = len(
-                dataframe
+            registros_finales = (
+
+                len(dataframe)
+
             )
 
 
@@ -901,17 +1430,23 @@ if boton_consultar:
             )
 
 
-            # =====================================================
+            # =================================================================
             # MOSTRAR RESULTADO
-            # =====================================================
+            # =================================================================
 
             st.success(
+
                 f"✅ Consulta RNDC exitosa: "
-                f"{registros_finales} registros encontrados."
+                f"{registros_finales:,} registros encontrados."
+
             )
 
 
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3 = (
+
+                st.columns(3)
+
+            )
 
 
             col1.metric(
@@ -942,7 +1477,9 @@ if boton_consultar:
 
 
             st.subheader(
+
                 "Vista previa de los datos"
+
             )
 
 
@@ -955,34 +1492,44 @@ if boton_consultar:
             )
 
 
-            # =====================================================
+            # =================================================================
             # CARGAR SNOWFLAKE
-            # =====================================================
+            # =================================================================
 
             with st.spinner(
+
                 "Cargando información a Snowflake..."
+
             ):
 
 
                 resultado = (
+
                     cargar_dataframe_snowflake(
 
                         dataframe
 
                     )
+
                 )
 
 
-            # =====================================================
+            # =================================================================
             # RESULTADO FINAL
-            # =====================================================
+            # =================================================================
 
             st.success(
+
                 "🎉 CARGA EXITOSA EN SNOWFLAKE"
+
             )
 
 
-            col1, col2 = st.columns(2)
+            col1, col2 = (
+
+                st.columns(2)
+
+            )
 
 
             col1.metric(
@@ -999,9 +1546,11 @@ if boton_consultar:
                 "Columnas nuevas",
 
                 len(
+
                     resultado[
                         "columnas_agregadas"
                     ]
+
                 )
 
             )
@@ -1013,8 +1562,11 @@ if boton_consultar:
 
 
                 st.info(
+
                     "Columnas agregadas automáticamente: "
+
                     +
+
                     ", ".join(
 
                         resultado[
@@ -1022,18 +1574,25 @@ if boton_consultar:
                         ]
 
                     )
+
                 )
 
 
             st.write(
+
                 "Destino:"
+
             )
 
 
             st.code(
+
                 f"{SNOWFLAKE_DATABASE}."
+
                 f"{SNOWFLAKE_SCHEMA}."
+
                 f"{SNOWFLAKE_TABLE}"
+
             )
 
 
@@ -1041,10 +1600,14 @@ if boton_consultar:
 
 
         st.error(
+
             "❌ Ocurrió un error"
+
         )
 
 
         st.exception(
+
             e
+
         )
