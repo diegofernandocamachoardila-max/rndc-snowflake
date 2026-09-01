@@ -1,17 +1,14 @@
 # -*- coding: utf-8 -*-
 
-import re
-from datetime import timedelta
-
-import pandas as pd
-import requests
 import streamlit as st
+import requests
+import pandas as pd
 import xml.etree.ElementTree as ET
-
-from xml.sax.saxutils import escape
-
 import snowflake.connector
+
+from datetime import timedelta
 from snowflake.connector.pandas_tools import write_pandas
+from xml.sax.saxutils import escape
 
 
 # =============================================================================
@@ -78,10 +75,8 @@ URL_RNDC = (
 
 
 # =============================================================================
-# VARIABLES DEL PROCESO 4
-#
-# SOLO PROCESO 4
-# CONSECUTIVOREMESA QUEDA EXCLUIDO
+# TODOS LOS CAMPOS DEL PROCESO 4
+# EXCEPTO CONSECUTIVOREMESA
 # =============================================================================
 
 VARIABLES_PROCESO4 = [
@@ -150,57 +145,35 @@ VARIABLES_PROCESO4 = [
 
 
 # =============================================================================
-# CLASE CONSULTA RNDC
+# CONSULTAR RNDC
 # =============================================================================
 
-class ConsultaRNDC:
+def consultar_rndc(
+
+    fecha_inicio,
+
+    fecha_fin
+
+):
 
 
-    def __init__(
-        self,
-        username,
-        password
-    ):
-
-        self.username = username
-        self.password = password
-        self.session = requests.Session()
+    variables = ",".join(
+        VARIABLES_PROCESO4
+    )
 
 
     # =========================================================================
-    # CONSULTAR MANIFIESTOS
-    # PROCESO 4
+    # XML RNDC
     # =========================================================================
 
-    def consultar_manifiestos(
-
-        self,
-
-        nit_empresa,
-
-        fecha_inicio,
-
-        fecha_fin
-
-    ):
-
-
-        variables = ",".join(
-            VARIABLES_PROCESO4
-        )
-
-
-        # =====================================================================
-        # XML RNDC
-        # =====================================================================
-
-        body = f"""<root>
+    body = f"""
+<root>
 
 <acceso>
 
-<username>{self.username}</username>
+<username>{RNDC_USERNAME}</username>
 
-<password>{self.password}</password>
+<password>{RNDC_PASSWORD}</password>
 
 </acceso>
 
@@ -223,28 +196,42 @@ class ConsultaRNDC:
 
 <documento>
 
-<NUMNITEMPRESATRANSPORTE>{nit_empresa}</NUMNITEMPRESATRANSPORTE>
+<NUMNITEMPRESATRANSPORTE>
+
+{NIT_EMPRESA}
+
+</NUMNITEMPRESATRANSPORTE>
 
 </documento>
 
 
 <documentorango>
 
-<iniFECHAING>'{fecha_inicio}'</iniFECHAING>
+<iniFECHAING>
 
-<finFECHAING>'{fecha_fin}'</finFECHAING>
+'{fecha_inicio}'
+
+</iniFECHAING>
+
+
+<finFECHAING>
+
+'{fecha_fin}'
+
+</finFECHAING>
 
 </documentorango>
 
 
-</root>"""
+</root>
+"""
 
 
-        # =====================================================================
-        # SOAP
-        # =====================================================================
+    # =========================================================================
+    # SOAP
+    # =========================================================================
 
-        xml_request = f"""<?xml version='1.0' encoding='ISO-8859-1'?>
+    xml_request = f"""<?xml version='1.0' encoding='ISO-8859-1'?>
 
 <SOAP-ENV:Envelope
 
@@ -263,7 +250,11 @@ xmlns:xsd="http://www.w3.org/2001/XMLSchema-instance">
 xmlns:m="urn:BPMServicesIntf-IBPMServices">
 
 
-<Request xsi:type="xsd:string">{escape(body)}</Request>
+<Request xsi:type="xsd:string">
+
+{escape(body)}
+
+</Request>
 
 
 </m:AtenderMensajeRNDC>
@@ -272,576 +263,283 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
 </SOAP-ENV:Body>
 
 
-</SOAP-ENV:Envelope>"""
-
-
-        try:
-
-
-            response = self.session.post(
-
-                URL_RNDC,
-
-                data=xml_request.encode(
-                    "ISO-8859-1"
-                ),
-
-                headers={
-
-                    "Content-Type":
-                    "text/xml; charset=ISO-8859-1"
-
-                },
-
-                timeout=180
-
-            )
-
-
-            response.raise_for_status()
-
-
-            return self._procesar_respuesta(
-
-                response.text
-
-            )
-
-
-        except requests.exceptions.Timeout:
-
-
-            raise Exception(
-
-                f"Timeout consultando RNDC entre "
-                f"{fecha_inicio} y {fecha_fin}."
-
-            )
-
-
-        except requests.exceptions.HTTPError as e:
-
-
-            raise Exception(
-
-                f"Error HTTP RNDC: {e}"
-
-            )
-
-
-        except Exception as e:
-
-
-            mensaje = str(e)
-
-
-            if mensaje.startswith(
-                "Error RNDC:"
-            ):
-
-                raise
-
-
-            raise Exception(
-
-                f"Error RNDC: {mensaje}"
-
-            )
+</SOAP-ENV:Envelope>
+"""
 
 
     # =========================================================================
-    # PROCESAR RESPUESTA
+    # CONSULTAR RNDC
     # =========================================================================
 
-    def _procesar_respuesta(
+    try:
 
-        self,
 
-        respuesta_xml
+        response = requests.post(
 
-    ):
+            URL_RNDC,
 
+            data=xml_request.encode(
+                "ISO-8859-1"
+            ),
 
-        try:
+            headers={
 
+                "Content-Type":
 
-            root = ET.fromstring(
+                "text/xml; charset=ISO-8859-1"
 
-                respuesta_xml
+            },
 
-            )
+            timeout=180
 
+        )
 
-            # =============================================================
-            # SOAP FAULT
-            # =============================================================
 
-            fault = root.find(
+        response.raise_for_status()
 
-                ".//"
-                "{http://schemas.xmlsoap.org/soap/envelope/}"
-                "Fault"
 
-            )
+    except requests.exceptions.Timeout:
 
 
-            if fault is not None:
+        raise Exception(
 
+            f"Timeout RNDC para el período "
+            f"{fecha_inicio} a {fecha_fin}"
 
-                textos = []
+        )
 
 
-                for child in fault:
+    except requests.exceptions.RequestException as e:
 
 
-                    if child.text:
+        raise Exception(
 
-                        textos.append(
-                            child.text
-                        )
+            f"Error de conexión con RNDC: {e}"
 
+        )
 
-                raise Exception(
 
-                    "SOAP Fault: "
+    # =========================================================================
+    # PROCESAR SOAP
+    # =========================================================================
 
-                    + " | ".join(
-                        textos
-                    )
+    try:
 
-                )
 
+        root = ET.fromstring(
+            response.text
+        )
 
-            # =============================================================
-            # RETURN
-            # =============================================================
 
-            nodo_return = root.find(
+    except Exception as e:
 
-                ".//return"
 
-            )
+        raise Exception(
 
+            f"No fue posible interpretar "
+            f"la respuesta SOAP: {e}"
 
-            if (
+        )
 
-                nodo_return is None
 
-                or not nodo_return.text
+    # =========================================================================
+    # BUSCAR SOAP FAULT
+    # =========================================================================
 
-            ):
+    fault = root.find(
 
-                return []
+        ".//"
+        "{http://schemas.xmlsoap.org/soap/envelope/}"
+        "Fault"
 
+    )
 
-            contenido = (
 
-                nodo_return.text
+    if fault is not None:
 
-                .strip()
 
-            )
+        mensaje_fault = []
 
 
-            root_rndc = ET.fromstring(
+        for elemento in fault.iter():
 
-                contenido
+            if elemento.text:
 
-            )
+                texto = elemento.text.strip()
 
+                if texto:
 
-            # =============================================================
-            # ERROR RNDC
-            # =============================================================
-
-            error = root_rndc.find(
-
-                ".//ErrorMSG"
-
-            )
-
-
-            if error is not None:
-
-
-                mensaje_error = (
-
-                    error.text
-
-                    or ""
-
-                ).strip()
-
-
-                # RNDC11 = no hay documentos
-
-                if (
-
-                    "RNDC11"
-
-                    in mensaje_error
-
-                    and
-
-                    "Documento no encontrado"
-
-                    in mensaje_error
-
-                ):
-
-                    return []
-
-
-                raise Exception(
-
-                    mensaje_error
-
-                )
-
-
-            # =============================================================
-            # EXTRAER DOCUMENTOS
-            # =============================================================
-
-            registros = []
-
-
-            documentos = root_rndc.findall(
-
-                ".//documento"
-
-            )
-
-
-            for doc in documentos:
-
-
-                registro = {}
-
-
-                for campo in doc:
-
-
-                    nombre = (
-
-                        campo.tag
-
-                        .split("}")[-1]
-
+                    mensaje_fault.append(
+                        texto
                     )
 
 
-                    registro[nombre] = (
+        raise Exception(
 
-                        campo.text
+            "SOAP Fault RNDC: "
 
-                    )
-
-
-                registros.append(
-
-                    registro
-
-                )
-
-
-            return registros
-
-
-        except ET.ParseError as e:
-
-
-            raise Exception(
-
-                f"No fue posible interpretar "
-                f"la respuesta XML del RNDC: {e}"
-
-            )
-
-
-        except Exception as e:
-
-
-            mensaje = str(e)
-
-
-            if mensaje.startswith(
-                "Error RNDC:"
-            ):
-
-                raise
-
-
-            raise Exception(
-
-                f"Error procesando respuesta: "
-                f"{mensaje}"
-
-            )
-
-
-    # =========================================================================
-    # CONVERTIR A DATAFRAME
-    # =========================================================================
-
-    def consultar_dataframe(
-
-        self,
-
-        nit_empresa,
-
-        fecha_inicio,
-
-        fecha_fin
-
-    ):
-
-
-        registros = (
-
-            self.consultar_manifiestos(
-
-                nit_empresa,
-
-                fecha_inicio,
-
-                fecha_fin
-
+            + " | ".join(
+                mensaje_fault
             )
 
         )
 
 
-        return pd.DataFrame(
+    # =========================================================================
+    # BUSCAR RETURN
+    # =========================================================================
 
-            registros
-
-        )
-
-
-# =============================================================================
-# EXTRAER FECHA DE FECHAING
-# =============================================================================
-
-def extraer_fecha(valor):
+    nodo_return = root.find(
+        ".//return"
+    )
 
 
-    if (
-
-        valor is None
-
-        or pd.isna(valor)
-
-    ):
-
-        return None
+    if nodo_return is None:
 
 
-    texto = str(
-        valor
+        return pd.DataFrame()
+
+
+    contenido = (
+        nodo_return.text
+        or ""
     ).strip()
 
 
+    if not contenido:
+
+
+        return pd.DataFrame()
+
+
     # =========================================================================
-    # FORMATO DD/MM/YYYY
+    # PROCESAR XML INTERNO
     # =========================================================================
 
-    coincidencia = re.search(
-
-        r"(\d{1,2}/\d{1,2}/\d{4})",
-
-        texto
-
-    )
+    try:
 
 
-    if coincidencia:
+        root_rndc = ET.fromstring(
+            contenido
+        )
 
 
-        fecha = pd.to_datetime(
+    except Exception as e:
 
-            coincidencia.group(1),
 
-            dayfirst=True,
+        raise Exception(
 
-            errors="coerce"
+            f"No fue posible interpretar "
+            f"la respuesta interna de RNDC: {e}"
 
         )
 
 
-        if pd.notna(
-            fecha
-        ):
-
-            return fecha.date()
-
-
     # =========================================================================
-    # FORMATO YYYY/MM/DD
+    # ERROR RNDC
     # =========================================================================
 
-    coincidencia = re.search(
-
-        r"(\d{4}/\d{1,2}/\d{1,2})",
-
-        texto
-
+    error = root_rndc.find(
+        ".//ErrorMSG"
     )
 
 
-    if coincidencia:
+    if error is not None:
 
 
-        fecha = pd.to_datetime(
-
-            coincidencia.group(1),
-
-            errors="coerce"
-
-        )
+        mensaje_error = (
+            error.text
+            or ""
+        ).strip()
 
 
-        if pd.notna(
-            fecha
-        ):
+        # RNDC11 significa que no existen documentos
+        # para esa consulta. No es un error técnico.
 
-            return fecha.date()
+        if (
 
-
-    # =========================================================================
-    # ÚLTIMO INTENTO
-    # =========================================================================
-
-    fecha = pd.to_datetime(
-
-        texto,
-
-        dayfirst=True,
-
-        errors="coerce"
-
-    )
-
-
-    if pd.notna(
-        fecha
-    ):
-
-        return fecha.date()
-
-
-    return None
-
-
-# =============================================================================
-# FILTRAR EXACTAMENTE EL PERÍODO SOLICITADO
-# =============================================================================
-
-def filtrar_periodo_solicitado(
-
-    dataframe,
-
-    fecha_inicio,
-
-    fecha_fin
-
-):
-
-
-    if dataframe.empty:
-
-        return dataframe
-
-
-    columna_fecha = None
-
-
-    for columna in dataframe.columns:
-
-
-        if str(columna).upper() == "FECHAING":
-
-
-            columna_fecha = columna
-
-            break
-
-
-    # Si RNDC no devolvió FECHAING,
-    # no eliminamos registros
-
-    if columna_fecha is None:
-
-        return dataframe
-
-
-    fechas = (
-
-        dataframe[
-            columna_fecha
-        ]
-
-        .apply(
-            extraer_fecha
-        )
-
-    )
-
-
-    mascara = fechas.apply(
-
-        lambda fecha:
-
-        (
-
-            fecha is not None
+            "RNDC11"
+            in mensaje_error
 
             and
 
-            fecha_inicio
+            "Documento no encontrado"
+            in mensaje_error
 
-            <=
+        ):
 
-            fecha
 
-            <=
+            return pd.DataFrame()
 
-            fecha_fin
 
+        raise Exception(
+            mensaje_error
         )
 
+
+    # =========================================================================
+    # EXTRAER DOCUMENTOS
+    # =========================================================================
+
+    registros = []
+
+
+    documentos = root_rndc.findall(
+        ".//documento"
     )
 
 
-    return (
+    for doc in documentos:
 
-        dataframe
 
-        .loc[
-            mascara
-        ]
+        registro = {}
 
-        .copy()
 
+        for campo in doc:
+
+
+            nombre = (
+                campo.tag
+                .split("}")[-1]
+                .upper()
+            )
+
+
+            registro[nombre] = (
+                campo.text
+            )
+
+
+        registros.append(
+            registro
+        )
+
+
+    return pd.DataFrame(
+        registros
     )
 
 
 # =============================================================================
-# CONSULTAR UN RANGO ADAPTATIVAMENTE
+# CONSULTA ADAPTATIVA
 #
-# PRIMERO INTENTA EL RANGO COMPLETO.
+# INTENTA CONSULTAR EL RANGO COMPLETO.
 #
 # SI FALLA:
-# - LO DIVIDE EN DOS.
-# - INTENTA CADA MITAD.
-# - SIGUE DIVIDIENDO HASTA LLEGAR A UN SOLO DÍA.
 #
-# UN DÍA QUE FALLE NO DETIENE EL RESTO DEL PERÍODO.
+# 1. LO DIVIDE EN DOS.
+# 2. CONSULTA CADA MITAD.
+# 3. SI UNA MITAD FALLA, LA VUELVE A DIVIDIR.
+# 4. CONTINÚA HASTA LLEGAR A UN SOLO DÍA.
+#
+# MUY IMPORTANTE:
+#
+# NO SE FILTRA FECHAING DESPUÉS.
+#
+# SE CONSERVA EXACTAMENTE TODO LO QUE DEVUELVA RNDC.
 # =============================================================================
 
 def consultar_rango_adaptativo(
-
-    consulta,
 
     fecha_inicio,
 
@@ -869,7 +567,7 @@ def consultar_rango_adaptativo(
             )
 
 
-        inicio_rndc = (
+        fecha_inicio_rndc = (
 
             fecha_inicio.strftime(
                 "%Y/%m/%d"
@@ -878,7 +576,7 @@ def consultar_rango_adaptativo(
         )
 
 
-        fin_rndc = (
+        fecha_fin_rndc = (
 
             fecha_fin.strftime(
                 "%Y/%m/%d"
@@ -889,13 +587,11 @@ def consultar_rango_adaptativo(
 
         dataframe = (
 
-            consulta.consultar_dataframe(
+            consultar_rndc(
 
-                NIT_EMPRESA,
+                fecha_inicio_rndc,
 
-                inicio_rndc,
-
-                fin_rndc
+                fecha_fin_rndc
 
             )
 
@@ -909,10 +605,7 @@ def consultar_rango_adaptativo(
 
 
         # =====================================================================
-        # SI YA LLEGAMOS A UN SOLO DÍA
-        #
-        # NO DETENEMOS EL RESTO DEL MES.
-        # GUARDAMOS EL ERROR Y CONTINUAMOS.
+        # SI YA ES UN SOLO DÍA
         # =====================================================================
 
         if fecha_inicio == fecha_fin:
@@ -945,10 +638,10 @@ def consultar_rango_adaptativo(
 
 
         # =====================================================================
-        # DIVIDIR EL RANGO EN DOS
+        # DIVIDIR EL RANGO
         # =====================================================================
 
-        total_dias = (
+        cantidad_dias = (
 
             fecha_fin
 
@@ -967,7 +660,7 @@ def consultar_rango_adaptativo(
 
             timedelta(
 
-                days=total_dias // 2
+                days=cantidad_dias // 2
 
             )
 
@@ -995,8 +688,6 @@ def consultar_rango_adaptativo(
 
             consultar_rango_adaptativo(
 
-                consulta,
-
                 fecha_inicio,
 
                 mitad,
@@ -1018,8 +709,6 @@ def consultar_rango_adaptativo(
 
             consultar_rango_adaptativo(
 
-                consulta,
-
                 inicio_segunda_parte,
 
                 fecha_fin,
@@ -1038,6 +727,7 @@ def consultar_rango_adaptativo(
 
         if not dataframe_1.empty:
 
+
             dataframes.append(
                 dataframe_1
             )
@@ -1045,12 +735,14 @@ def consultar_rango_adaptativo(
 
         if not dataframe_2.empty:
 
+
             dataframes.append(
                 dataframe_2
             )
 
 
-        if not dataframes:
+        if len(dataframes) == 0:
+
 
             return pd.DataFrame()
 
@@ -1069,7 +761,7 @@ def consultar_rango_adaptativo(
 # =============================================================================
 # CONSULTAR PERÍODO GRANDE
 #
-# EL PERÍODO SE DIVIDE PRIMERO EN BLOQUES DE 4 DÍAS.
+# SE INTENTA PRIMERO EN BLOQUES DE 4 DÍAS.
 #
 # EJEMPLO:
 #
@@ -1077,14 +769,14 @@ def consultar_rango_adaptativo(
 # 5 - 8
 # 9 - 12
 #
-# SI UN BLOQUE FALLA:
+# SI FALLA:
 #
 # SE DIVIDE AUTOMÁTICAMENTE.
+#
+# NO SE FILTRA FECHAING.
 # =============================================================================
 
 def consultar_periodo_grande(
-
-    consulta,
 
     fecha_inicio,
 
@@ -1104,7 +796,7 @@ def consultar_periodo_grande(
 
 
     # =========================================================================
-    # CREAR BLOQUES DE 4 DÍAS
+    # CREAR BLOQUES
     # =========================================================================
 
     while fecha_actual <= fecha_fin:
@@ -1182,7 +874,7 @@ def consultar_periodo_grande(
 
 
         # =====================================================================
-        # PROGRESO PRINCIPAL
+        # MOSTRAR PROGRESO
         # =====================================================================
 
         if callback_progreso is not None:
@@ -1231,14 +923,12 @@ def consultar_periodo_grande(
 
 
         # =====================================================================
-        # CONSULTA ADAPTATIVA
+        # CONSULTAR BLOQUE
         # =====================================================================
 
         dataframe_bloque = (
 
             consultar_rango_adaptativo(
-
-                consulta,
 
                 inicio_bloque,
 
@@ -1257,14 +947,12 @@ def consultar_periodo_grande(
 
 
             dataframes.append(
-
                 dataframe_bloque
-
             )
 
 
     # =========================================================================
-    # NO HUBO RESULTADOS
+    # SI NO HUBO RESULTADOS
     # =========================================================================
 
     if not dataframes:
@@ -1280,10 +968,14 @@ def consultar_periodo_grande(
 
 
     # =========================================================================
-    # UNIR TODOS LOS BLOQUES
+    # UNIR TODOS LOS RESULTADOS
+    #
+    # AQUÍ NO FILTRAMOS FECHAING.
+    #
+    # SE CONSERVA TODO LO QUE RNDC DEVOLVIÓ.
     # =========================================================================
 
-    dataframe = pd.concat(
+    dataframe_final = pd.concat(
 
         dataframes,
 
@@ -1295,29 +987,10 @@ def consultar_periodo_grande(
 
 
     # =========================================================================
-    # FILTRAR AL PERÍODO EXACTO SELECCIONADO
+    # MAYÚSCULAS
     # =========================================================================
 
-    dataframe = (
-
-        filtrar_periodo_solicitado(
-
-            dataframe,
-
-            fecha_inicio,
-
-            fecha_fin
-
-        )
-
-    )
-
-
-    # =========================================================================
-    # COLUMNAS EN MAYÚSCULAS
-    # =========================================================================
-
-    dataframe.columns = [
+    dataframe_final.columns = [
 
         str(
             columna
@@ -1325,7 +998,7 @@ def consultar_periodo_grande(
 
         for columna
 
-        in dataframe.columns
+        in dataframe_final.columns
 
     ]
 
@@ -1334,12 +1007,12 @@ def consultar_periodo_grande(
     # ELIMINAR DUPLICADOS
     # =========================================================================
 
-    if "INGRESOID" in dataframe.columns:
+    if "INGRESOID" in dataframe_final.columns:
 
 
-        dataframe = (
+        dataframe_final = (
 
-            dataframe
+            dataframe_final
 
             .drop_duplicates(
 
@@ -1356,7 +1029,7 @@ def consultar_periodo_grande(
 
     return (
 
-        dataframe,
+        dataframe_final,
 
         errores
 
@@ -1416,18 +1089,20 @@ def preparar_tabla_snowflake(
 
 
         # =====================================================================
-        # CREAR TABLA
+        # CREAR TABLA SI NO EXISTE
         # =====================================================================
 
-        columnas_sql = [
+        columnas_sql = []
 
-            f'"{columna}" VARCHAR'
 
-            for columna
+        for columna in dataframe.columns:
 
-            in dataframe.columns
 
-        ]
+            columnas_sql.append(
+
+                f'"{columna}" VARCHAR'
+
+            )
 
 
         sql_crear_tabla = f"""
@@ -1448,9 +1123,7 @@ def preparar_tabla_snowflake(
 
 
         cursor.execute(
-
             sql_crear_tabla
-
         )
 
 
@@ -1464,8 +1137,7 @@ def preparar_tabla_snowflake(
 
         FROM
 
-        {SNOWFLAKE_DATABASE}
-        .INFORMATION_SCHEMA.COLUMNS
+        {SNOWFLAKE_DATABASE}.INFORMATION_SCHEMA.COLUMNS
 
         WHERE TABLE_SCHEMA = '{SNOWFLAKE_SCHEMA}'
 
@@ -1475,9 +1147,7 @@ def preparar_tabla_snowflake(
 
 
         cursor.execute(
-
             sql_columnas
-
         )
 
 
@@ -1564,10 +1234,12 @@ def eliminar_registros_existentes(
 
     if dataframe.empty:
 
+
         return
 
 
     if "INGRESOID" not in dataframe.columns:
+
 
         return
 
@@ -1592,6 +1264,7 @@ def eliminar_registros_existentes(
 
 
     if not ingresos_ids:
+
 
         return
 
@@ -1626,33 +1299,50 @@ def eliminar_registros_existentes(
 
                     inicio
 
-                    + tamanio_lote
+                    +
+
+                    tamanio_lote
 
                 ]
 
             )
 
 
+            valores_sql_lista = []
+
+
+            for valor in lote:
+
+
+                valor_limpio = (
+
+                    str(
+                        valor
+                    )
+
+                    .replace(
+
+                        "'",
+
+                        "''"
+
+                    )
+
+                )
+
+
+                valores_sql_lista.append(
+
+                    f"'{valor_limpio}'"
+
+                )
+
+
             valores_sql = (
 
                 ", ".join(
 
-                    "'"
-
-                    +
-
-                    valor.replace(
-                        "'",
-                        "''"
-                    )
-
-                    +
-
-                    "'"
-
-                    for valor
-
-                    in lote
+                    valores_sql_lista
 
                 )
 
@@ -1679,9 +1369,7 @@ def eliminar_registros_existentes(
 
 
             cursor.execute(
-
                 sql_delete
-
             )
 
 
@@ -1702,20 +1390,20 @@ def cargar_dataframe_snowflake(
 ):
 
 
-    if dataframe.empty:
-
-
-        raise Exception(
-
-            "No hay registros para cargar."
-
-        )
-
-
     conexion = None
 
 
     try:
+
+
+        if dataframe.empty:
+
+
+            raise Exception(
+
+                "No hay registros para cargar."
+
+            )
 
 
         # =====================================================================
@@ -1730,7 +1418,7 @@ def cargar_dataframe_snowflake(
 
 
         # =====================================================================
-        # COLUMNAS EN MAYÚSCULAS
+        # MAYÚSCULAS
         # =====================================================================
 
         df_snowflake.columns = [
@@ -1747,7 +1435,7 @@ def cargar_dataframe_snowflake(
 
 
         # =====================================================================
-        # CONVERTIR VALORES A TEXTO
+        # CONVERTIR TODO A STRING
         # =====================================================================
 
         for columna in df_snowflake.columns:
@@ -1795,7 +1483,7 @@ def cargar_dataframe_snowflake(
 
 
         # =====================================================================
-        # ELIMINAR REGISTROS EXISTENTES
+        # ELIMINAR REGISTROS DUPLICADOS EXISTENTES
         # =====================================================================
 
         eliminar_registros_existentes(
@@ -1808,7 +1496,7 @@ def cargar_dataframe_snowflake(
 
 
         # =====================================================================
-        # CARGAR
+        # CARGAR DATAFRAME
         # =====================================================================
 
         success, chunks, rows, output = (
@@ -1875,9 +1563,7 @@ def cargar_dataframe_snowflake(
 # =============================================================================
 
 st.title(
-
     "🚛 RNDC → Snowflake"
-
 )
 
 
@@ -1903,42 +1589,52 @@ secrets_faltantes = []
 configuracion_secrets = {
 
     "RNDC_USERNAME":
+
     RNDC_USERNAME,
 
 
     "RNDC_PASSWORD":
+
     RNDC_PASSWORD,
 
 
     "NIT_EMPRESA":
+
     NIT_EMPRESA,
 
 
     "SNOWFLAKE_ACCOUNT":
+
     SNOWFLAKE_ACCOUNT,
 
 
     "SNOWFLAKE_USER":
+
     SNOWFLAKE_USER,
 
 
     "SNOWFLAKE_PASSWORD":
+
     SNOWFLAKE_PASSWORD,
 
 
     "SNOWFLAKE_ROLE":
+
     SNOWFLAKE_ROLE,
 
 
     "SNOWFLAKE_WAREHOUSE":
+
     SNOWFLAKE_WAREHOUSE,
 
 
     "SNOWFLAKE_DATABASE":
+
     SNOWFLAKE_DATABASE,
 
 
     "SNOWFLAKE_SCHEMA":
+
     SNOWFLAKE_SCHEMA
 
 }
@@ -1955,9 +1651,7 @@ for nombre, valor in (
 
 
         secrets_faltantes.append(
-
             nombre
-
         )
 
 
@@ -2071,23 +1765,6 @@ if boton_consultar:
 
 
         # =====================================================================
-        # CREAR CONSULTA
-        # =====================================================================
-
-        consulta = (
-
-            ConsultaRNDC(
-
-                RNDC_USERNAME,
-
-                RNDC_PASSWORD
-
-            )
-
-        )
-
-
-        # =====================================================================
         # COMPONENTES DE PROGRESO
         # =====================================================================
 
@@ -2132,7 +1809,9 @@ if boton_consultar:
 
                 )
 
-                * 100
+                *
+
+                100
 
             )
 
@@ -2140,8 +1819,11 @@ if boton_consultar:
             barra_progreso.progress(
 
                 min(
+
                     porcentaje,
+
                     99
+
                 )
 
             )
@@ -2175,8 +1857,6 @@ if boton_consultar:
 
                 consultar_periodo_grande(
 
-                    consulta,
-
                     fecha_inicio,
 
                     fecha_fin,
@@ -2191,21 +1871,12 @@ if boton_consultar:
 
 
         barra_progreso.progress(
-
             100
-
-        )
-
-
-        mensaje_progreso.success(
-
-            "✅ Consulta de todos los bloques terminada."
-
         )
 
 
         # =====================================================================
-        # MOSTRAR ERRORES DE DÍAS PROBLEMÁTICOS
+        # MOSTRAR ERRORES
         # =====================================================================
 
         if errores_rndc:
@@ -2213,13 +1884,9 @@ if boton_consultar:
 
             st.warning(
 
-                f"⚠️ RNDC presentó problemas en "
+                f"⚠️ Algunos días presentaron problemas en RNDC. "
 
-                f"{len(errores_rndc)} día(s). "
-
-                f"La aplicación continuó con el resto "
-
-                f"del período."
+                f"El sistema continuó descargando el resto del período."
 
             )
 
@@ -2231,11 +1898,20 @@ if boton_consultar:
             ):
 
 
-                st.dataframe(
+                dataframe_errores = (
 
                     pd.DataFrame(
+
                         errores_rndc
-                    ),
+
+                    )
+
+                )
+
+
+                st.dataframe(
+
+                    dataframe_errores,
 
                     use_container_width=True
 
@@ -2261,30 +1937,11 @@ if boton_consultar:
 
 
         # =====================================================================
-        # COLUMNAS EN MAYÚSCULAS
-        # =====================================================================
-
-        dataframe.columns = [
-
-            str(
-                columna
-            ).upper()
-
-            for columna
-
-            in dataframe.columns
-
-        ]
-
-
-        # =====================================================================
-        # DUPLICADOS
+        # ELIMINAR DUPLICADOS
         # =====================================================================
 
         registros_antes = len(
-
             dataframe
-
         )
 
 
@@ -2309,9 +1966,7 @@ if boton_consultar:
 
 
         registros_finales = len(
-
             dataframe
-
         )
 
 
@@ -2485,13 +2140,27 @@ if boton_consultar:
             )
 
 
+        st.write(
+            "Destino:"
+        )
+
+
+        st.code(
+
+            f"{SNOWFLAKE_DATABASE}."
+
+            f"{SNOWFLAKE_SCHEMA}."
+
+            f"{SNOWFLAKE_TABLE}"
+
+        )
+
+
     except Exception as e:
 
 
         st.error(
-
             "❌ Ocurrió un error"
-
         )
 
 
