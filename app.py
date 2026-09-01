@@ -112,9 +112,9 @@ VARIABLES_PROCESO4 = [
 
    # 'OBSERVACIONES',
 
-   'CODVIA',
+   # 'CODVIA',
 
-   # 'SEGURIDADQR'
+   'SEGURIDADQR'
     
 ]
 
