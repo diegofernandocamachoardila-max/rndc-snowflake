@@ -73,14 +73,14 @@ VARIABLES_PROCESO4 = [
 
     'CODMUNICIPIOORIGENMANIFIESTO',
 
-    'CODMUNICIPIODESTINOMANIFIESTO'
+    'CODMUNICIPIODESTINOMANIFIESTO',
 
     
     # =========================================================
     # CAMPOS DESACTIVADOS
     # =========================================================
 
-    'CODIDTITULARMANIFIESTO',
+    'CODIDTITULARMANIFIESTO'
 
     # 'NUMIDTITULARMANIFIESTO',
 
