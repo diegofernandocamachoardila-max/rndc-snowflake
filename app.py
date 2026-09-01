@@ -80,9 +80,9 @@ VARIABLES_PROCESO4 = [
     # CAMPOS DESACTIVADOS
     # =========================================================
 
-    'CODIDTITULARMANIFIESTO'
+    'CODIDTITULARMANIFIESTO',
 
-    # 'NUMIDTITULARMANIFIESTO',
+    'NUMIDTITULARMANIFIESTO'
 
     # 'CODIDCONDUCTOR',
 
