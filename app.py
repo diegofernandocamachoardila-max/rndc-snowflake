@@ -1,13 +1,11 @@
-# -*- coding: utf-8 -*-
-
 import re
+import time
 from datetime import timedelta
 
 import pandas as pd
 import requests
 import streamlit as st
 import xml.etree.ElementTree as ET
-
 from xml.sax.saxutils import escape
 
 import snowflake.connector
@@ -15,7 +13,7 @@ from snowflake.connector.pandas_tools import write_pandas
 
 
 # =============================================================================
-# CONFIGURACIÓN DE LA PÁGINA
+# CONFIGURACIÓN STREAMLIT
 # =============================================================================
 
 st.set_page_config(
@@ -26,7 +24,7 @@ st.set_page_config(
 
 
 # =============================================================================
-# FUNCIÓN PARA LEER SECRETS
+# LEER SECRETS
 # =============================================================================
 
 def obtener_secret(nombre):
@@ -79,9 +77,6 @@ URL_RNDC = (
 
 # =============================================================================
 # VARIABLES DEL PROCESO 4
-#
-# SOLO PROCESO 4
-# CONSECUTIVOREMESA QUEDA EXCLUIDO
 # =============================================================================
 
 VARIABLES_PROCESO4 = [
@@ -91,46 +86,19 @@ VARIABLES_PROCESO4 = [
     "FECHAING",
     "NUMPLACA",
     "NUMPLACAREMOLQUE",
-    "VALORFLETEPACTADOVIAJE",
-    "FECHAEXPEDICIONMANIFIESTO",
-    "CODOPERACIONTRANSPORTE",
-    "CONSECUTIVOINFORMACIONVIAJE",
-    "MANNROMANIFIESTOTRANSBORDO",
-    "CODMUNICIPIOORIGENMANIFIESTO",
-    "CODMUNICIPIODESTINOMANIFIESTO",
-    "CODIDTITULARMANIFIESTO",
-    "NUMIDTITULARMANIFIESTO",
-    "CODIDCONDUCTOR",
-    "NUMIDCONDUCTOR",
-    "CODIDCONDUCTOR2",
-    "NUMIDCONDUCTOR2",
-    "RETENCIONFUENTEMANIFIESTO",
-    "RETENCIONICAMANIFIESTOCARGA",
-    "VALORANTICIPOMANIFIESTO",
-    "CODMUNICIPIOPAGOSALDO",
-    "FECHAPAGOSALDOMANIFIESTO",
-    "CODRESPONSABLEPAGOCARGUE",
-    "CODRESPONSABLEPAGODESCARGUE",
-    "NITMONITOREOFLOTA",
-    "ACEPTACIONELECTRONICA",
-    "OBSERVACIONES",
-    "CODVIA",
-    "SEGURIDADQR"
+    "VALORFLETEPACTADOVIAJE"
 
 ]
 
 
 # =============================================================================
-# CLASE CONSULTA RNDC
+# CONSULTA RNDC
 # =============================================================================
 
 class ConsultaRNDC:
 
-    def __init__(
-        self,
-        username,
-        password
-    ):
+
+    def __init__(self, username, password):
 
         self.username = username
         self.password = password
@@ -138,17 +106,14 @@ class ConsultaRNDC:
 
 
     # =========================================================================
-    # CONSULTAR MANIFIESTOS
-    # PROCESO 4
+    # CONSULTAR PROCESO 4
     # =========================================================================
 
     def consultar_manifiestos(
-
         self,
         nit_empresa,
         fecha_inicio,
         fecha_fin
-
     ):
 
         variables = ",".join(
@@ -156,94 +121,58 @@ class ConsultaRNDC:
         )
 
 
-        # =====================================================================
-        # XML RNDC
-        # =====================================================================
+        # ---------------------------------------------------------------------
+        # IMPORTANTE
+        #
+        # FECHAING ES UN CAMPO ALFANUMÉRICO PARA EL MOTOR DEL RNDC.
+        # Por eso las fechas se envían entre comillas sencillas.
+        # ---------------------------------------------------------------------
 
-        body = f"""<root>
-
+        body = f"""
+<root>
 <acceso>
-
 <username>{self.username}</username>
-
 <password>{self.password}</password>
-
 </acceso>
-
-
 <solicitud>
-
 <tipo>3</tipo>
-
 <procesoid>4</procesoid>
-
 </solicitud>
-
-
 <variables>
-
 {variables}
-
 </variables>
-
-
 <documento>
-
 <NUMNITEMPRESATRANSPORTE>{nit_empresa}</NUMNITEMPRESATRANSPORTE>
-
 </documento>
-
-
 <documentorango>
-
 <iniFECHAING>'{fecha_inicio}'</iniFECHAING>
-
 <finFECHAING>'{fecha_fin}'</finFECHAING>
-
 </documentorango>
+</root>
+"""
 
-
-</root>"""
-
-
-        # =====================================================================
-        # SOAP
-        # =====================================================================
 
         xml_request = f"""<?xml version='1.0' encoding='ISO-8859-1'?>
 
 <SOAP-ENV:Envelope
-
 xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
-
 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-
 xmlns:xsd="http://www.w3.org/2001/XMLSchema-instance">
-
 
 <SOAP-ENV:Body>
 
-
 <m:AtenderMensajeRNDC
-
 xmlns:m="urn:BPMServicesIntf-IBPMServices">
-
 
 <Request xsi:type="xsd:string">{escape(body)}</Request>
 
-
 </m:AtenderMensajeRNDC>
-
 
 </SOAP-ENV:Body>
 
+</SOAP-ENV:Envelope>
+"""
 
-</SOAP-ENV:Envelope>"""
-
-
-        # =====================================================================
-        # CONSULTAR RNDC
-        # =====================================================================
 
         try:
 
@@ -256,10 +185,8 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
                 ),
 
                 headers={
-
                     "Content-Type":
                     "text/xml; charset=ISO-8859-1"
-
                 },
 
                 timeout=180
@@ -301,6 +228,7 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
             ):
                 raise
 
+
             raise Exception(
                 f"Error RNDC: {mensaje}"
             )
@@ -311,10 +239,8 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
     # =========================================================================
 
     def _procesar_respuesta(
-
         self,
         respuesta_xml
-
     ):
 
         try:
@@ -329,17 +255,14 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
             # =============================================================
 
             fault = root.find(
-
-                ".//"
-                "{http://schemas.xmlsoap.org/soap/envelope/}"
-                "Fault"
-
+                ".//{http://schemas.xmlsoap.org/soap/envelope/}Fault"
             )
 
 
             if fault is not None:
 
                 textos = []
+
 
                 for child in fault:
 
@@ -353,32 +276,53 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
                 raise Exception(
 
                     "SOAP Fault: "
-                    + " | ".join(textos)
+
+                    +
+
+                    " | ".join(
+                        textos
+                    )
 
                 )
 
 
             # =============================================================
-            # RETURN
+            # BUSCAR RETURN
             # =============================================================
 
-            nodo_return = root.find(
-                ".//return"
-            )
+            nodo_return = None
+
+
+            for nodo in root.iter():
+
+                nombre = nodo.tag.split(
+                    "}"
+                )[-1]
+
+
+                if nombre.lower() == "return":
+
+                    nodo_return = nodo
+                    break
 
 
             if (
                 nodo_return is None
-                or not nodo_return.text
+                or
+                not nodo_return.text
             ):
 
                 return []
 
 
             contenido = (
-                nodo_return.text
-                .strip()
+                nodo_return.text.strip()
             )
+
+
+            if not contenido:
+
+                return []
 
 
             root_rndc = ET.fromstring(
@@ -387,29 +331,46 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
 
 
             # =============================================================
-            # ERROR RNDC
+            # ERRORES RNDC
             # =============================================================
 
-            error = root_rndc.find(
-                ".//ErrorMSG"
-            )
+            mensaje_error = None
 
 
-            if error is not None:
+            for nodo in root_rndc.iter():
 
-                mensaje_error = (
-                    error.text
-                    or ""
-                ).strip()
+                nombre = nodo.tag.split(
+                    "}"
+                )[-1]
 
 
-                # RNDC11 = no hay documentos
+                if nombre == "ErrorMSG":
+
+                    mensaje_error = (
+                        nodo.text
+                        or
+                        ""
+                    ).strip()
+
+                    break
+
+
+            if mensaje_error:
+
+
+                # Documento no encontrado
+                # significa simplemente sin registros.
+
                 if (
+
                     "RNDC11"
                     in mensaje_error
+
                     and
+
                     "Documento no encontrado"
                     in mensaje_error
+
                 ):
 
                     return []
@@ -421,35 +382,53 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
 
 
             # =============================================================
-            # EXTRAER DOCUMENTOS
+            # REGISTROS
             # =============================================================
 
             registros = []
 
-            documentos = root_rndc.findall(
-                ".//documento"
-            )
+
+            documentos = []
+
+
+            for nodo in root_rndc.iter():
+
+                nombre = nodo.tag.split(
+                    "}"
+                )[-1]
+
+
+                if nombre.lower() == "documento":
+
+                    documentos.append(
+                        nodo
+                    )
 
 
             for doc in documentos:
 
                 registro = {}
 
+
                 for campo in doc:
 
                     nombre = (
-                        campo.tag
-                        .split("}")[-1]
+                        campo.tag.split(
+                            "}"
+                        )[-1]
                     )
+
 
                     registro[nombre] = (
                         campo.text
                     )
 
 
-                registros.append(
-                    registro
-                )
+                if registro:
+
+                    registros.append(
+                        registro
+                    )
 
 
             return registros
@@ -459,7 +438,7 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
 
             raise Exception(
 
-                f"No fue posible interpretar "
+                "No fue posible interpretar "
                 f"la respuesta XML del RNDC: {e}"
 
             )
@@ -469,41 +448,39 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
 
             mensaje = str(e)
 
+
             if mensaje.startswith(
                 "Error RNDC:"
             ):
+
                 raise
 
 
             raise Exception(
 
-                f"Error procesando respuesta: "
+                "Error procesando respuesta: "
                 f"{mensaje}"
 
             )
 
 
     # =========================================================================
-    # CONVERTIR A DATAFRAME
+    # DATAFRAME
     # =========================================================================
 
     def consultar_dataframe(
-
         self,
         nit_empresa,
         fecha_inicio,
         fecha_fin
-
     ):
 
         registros = (
 
             self.consultar_manifiestos(
-
                 nit_empresa,
                 fecha_inicio,
                 fecha_fin
-
             )
 
         )
@@ -515,15 +492,17 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
 
 
 # =============================================================================
-# EXTRAER FECHA DE FECHAING
+# EXTRAER FECHA
 # =============================================================================
 
 def extraer_fecha(valor):
 
     if (
         valor is None
-        or pd.isna(valor)
+        or
+        pd.isna(valor)
     ):
+
         return None
 
 
@@ -533,79 +512,96 @@ def extraer_fecha(valor):
 
 
     # =========================================================================
-    # FORMATO DD/MM/YYYY
+    # DD/MM/YYYY
     # =========================================================================
 
     coincidencia = re.search(
-
         r"(\d{1,2}/\d{1,2}/\d{4})",
-
         texto
-
     )
 
 
     if coincidencia:
 
         fecha = pd.to_datetime(
-
             coincidencia.group(1),
-
             dayfirst=True,
-
             errors="coerce"
-
         )
 
 
-        if pd.notna(fecha):
+        if pd.notna(
+            fecha
+        ):
+
             return fecha.date()
 
 
     # =========================================================================
-    # FORMATO YYYY/MM/DD
+    # YYYY/MM/DD
     # =========================================================================
 
     coincidencia = re.search(
-
         r"(\d{4}/\d{1,2}/\d{1,2})",
-
         texto
-
     )
 
 
     if coincidencia:
 
         fecha = pd.to_datetime(
-
             coincidencia.group(1),
-
             errors="coerce"
-
         )
 
 
-        if pd.notna(fecha):
+        if pd.notna(
+            fecha
+        ):
+
             return fecha.date()
 
 
     # =========================================================================
-    # ÚLTIMO INTENTO
+    # YYYY-MM-DD
+    # =========================================================================
+
+    coincidencia = re.search(
+        r"(\d{4}-\d{1,2}-\d{1,2})",
+        texto
+    )
+
+
+    if coincidencia:
+
+        fecha = pd.to_datetime(
+            coincidencia.group(1),
+            errors="coerce"
+        )
+
+
+        if pd.notna(
+            fecha
+        ):
+
+            return fecha.date()
+
+
+    # =========================================================================
+    # INTENTO GENERAL
     # =========================================================================
 
     fecha = pd.to_datetime(
-
         texto,
-
         dayfirst=True,
-
         errors="coerce"
-
     )
 
 
-    if pd.notna(fecha):
+    if pd.notna(
+        fecha
+    ):
+
         return fecha.date()
 
 
@@ -613,18 +609,17 @@ def extraer_fecha(valor):
 
 
 # =============================================================================
-# FILTRAR EXACTAMENTE EL PERÍODO SOLICITADO
+# FILTRAR PERÍODO EXACTO
 # =============================================================================
 
 def filtrar_periodo_solicitado(
-
     dataframe,
     fecha_inicio,
     fecha_fin
-
 ):
 
     if dataframe.empty:
+
         return dataframe
 
 
@@ -634,9 +629,15 @@ def filtrar_periodo_solicitado(
     for columna in dataframe.columns:
 
         if (
-            str(columna).upper()
+
+            str(
+                columna
+            ).upper()
+
             ==
+
             "FECHAING"
+
         ):
 
             columna_fecha = columna
@@ -644,162 +645,413 @@ def filtrar_periodo_solicitado(
 
 
     # Si RNDC no devolvió FECHAING
-    # no eliminamos registros
+    # no eliminamos registros.
+
     if columna_fecha is None:
+
         return dataframe
 
 
-    fechas = (
-        dataframe[columna_fecha]
-        .apply(extraer_fecha)
+    fechas = dataframe[
+        columna_fecha
+    ].apply(
+        extraer_fecha
     )
 
 
     mascara = fechas.apply(
-
         lambda fecha:
-
         (
             fecha is not None
             and
-            fecha_inicio
-            <=
-            fecha
-            <=
-            fecha_fin
+            fecha_inicio <= fecha <= fecha_fin
+        )
+    )
+
+
+    return dataframe.loc[
+        mascara
+    ].copy()
+
+
+# =============================================================================
+# CONSULTAR UN RANGO Y FILTRAR UN SOLO DÍA
+# =============================================================================
+
+def consultar_y_filtrar_dia(
+    consulta,
+    fecha_objetivo,
+    fecha_consulta_inicio,
+    fecha_consulta_fin
+):
+
+    inicio_rndc = (
+
+        fecha_consulta_inicio.strftime(
+            "%Y/%m/%d"
         )
 
     )
 
 
-    return (
-        dataframe
-        .loc[mascara]
-        .copy()
+    fin_rndc = (
+
+        fecha_consulta_fin.strftime(
+            "%Y/%m/%d"
+        )
+
+    )
+
+
+    df = consulta.consultar_dataframe(
+
+        NIT_EMPRESA,
+
+        inicio_rndc,
+
+        fin_rndc
+
+    )
+
+
+    if df.empty:
+
+        return df
+
+
+    return filtrar_periodo_solicitado(
+
+        df,
+
+        fecha_objetivo,
+
+        fecha_objetivo
+
     )
 
 
 # =============================================================================
-# CONSULTAR PERÍODOS GRANDES
+# CONSULTAR DÍA CON ESTRATEGIAS DE RESPALDO
 #
-# SIGUE SIENDO EXCLUSIVAMENTE EL PROCESO 4.
+# SOLO PROCESO 4
+# =============================================================================
+
+def consultar_dia_con_respaldo(
+    consulta,
+    fecha_objetivo
+):
+
+    errores = []
+
+
+    dia_anterior = (
+
+        fecha_objetivo
+
+        -
+
+        timedelta(days=1)
+
+    )
+
+
+    dia_siguiente = (
+
+        fecha_objetivo
+
+        +
+
+        timedelta(days=1)
+
+    )
+
+
+    dos_dias_despues = (
+
+        fecha_objetivo
+
+        +
+
+        timedelta(days=2)
+
+    )
+
+
+    estrategias = [
+
+        (
+            "normal",
+            fecha_objetivo,
+            dia_siguiente
+        ),
+
+        (
+            "ventana_anterior",
+            dia_anterior,
+            dia_siguiente
+        ),
+
+        (
+            "ventana_ampliada",
+            fecha_objetivo,
+            dos_dias_despues
+        ),
+
+        (
+            "ventana_anterior_ampliada",
+            dia_anterior,
+            dos_dias_despues
+        )
+
+    ]
+
+
+    for nombre_estrategia, inicio, fin in estrategias:
+
+
+        for intento in range(1, 3):
+
+            try:
+
+                df = consultar_y_filtrar_dia(
+
+                    consulta,
+
+                    fecha_objetivo,
+
+                    inicio,
+
+                    fin
+
+                )
+
+
+                return (
+
+                    df,
+
+                    nombre_estrategia,
+
+                    errores
+
+                )
+
+
+            except Exception as e:
+
+                mensaje = str(e)
+
+
+                errores.append(
+
+                    {
+
+                        "estrategia":
+                        nombre_estrategia,
+
+                        "intento":
+                        intento,
+
+                        "inicio":
+                        inicio.strftime(
+                            "%Y/%m/%d"
+                        ),
+
+                        "fin":
+                        fin.strftime(
+                            "%Y/%m/%d"
+                        ),
+
+                        "error":
+                        mensaje
+
+                    }
+
+                )
+
+
+                if intento < 2:
+
+                    time.sleep(
+                        1
+                    )
+
+
+        time.sleep(
+            1
+        )
+
+
+    resumen = " | ".join(
+
+        [
+
+            (
+
+                f"{error['estrategia']} "
+
+                f"[{error['inicio']} → {error['fin']}]: "
+
+                f"{error['error']}"
+
+            )
+
+            for error in errores
+
+        ]
+
+    )
+
+
+    raise Exception(
+        resumen
+    )
+
+
+# =============================================================================
+# CONSULTAR PERÍODO GRANDE
 # =============================================================================
 
 def consultar_periodo_grande(
+
     consulta,
+
     fecha_inicio,
+
     fecha_fin,
+
     callback_progreso=None
+
 ):
 
-    """
-    Consulta cada día como [día, día + 1] y después filtra exactamente
-    los registros del día solicitado.
-
-    Si un día produce un error del RNDC, se registra el error y se continúa
-    con los demás días para que un solo día problemático no destruya toda
-    la descarga del período.
-    """
-
     dataframes = []
+
     errores_dias = []
 
+    estrategias_usadas = []
+
+
     total_dias = (
-        fecha_fin - fecha_inicio
+
+        fecha_fin
+
+        -
+
+        fecha_inicio
+
     ).days + 1
 
+
     fecha_actual = fecha_inicio
+
     indice = 0
 
 
     while fecha_actual <= fecha_fin:
 
+
         indice += 1
 
+
         siguiente_dia = (
+
             fecha_actual
+
             +
+
             timedelta(days=1)
+
         )
 
 
         if callback_progreso is not None:
 
             callback_progreso(
+
                 indice,
+
                 total_dias,
+
                 fecha_actual,
+
                 siguiente_dia
+
             )
-
-
-        inicio_rndc = fecha_actual.strftime(
-            "%Y/%m/%d"
-        )
-
-        fin_rndc = siguiente_dia.strftime(
-            "%Y/%m/%d"
-        )
 
 
         try:
 
-            df_dia = consulta.consultar_dataframe(
+            (
 
-                NIT_EMPRESA,
-                inicio_rndc,
-                fin_rndc
+                df_dia,
+
+                estrategia,
+
+                errores_intentos
+
+            ) = consultar_dia_con_respaldo(
+
+                consulta,
+
+                fecha_actual
+
+            )
+
+
+            estrategias_usadas.append(
+
+                (
+
+                    fecha_actual,
+
+                    estrategia,
+
+                    len(df_dia)
+
+                )
 
             )
 
 
             if not df_dia.empty:
 
-                # RNDC puede devolver registros
-                # del día siguiente.
-                # Conservamos solamente
-                # el día solicitado.
-
-                df_dia = filtrar_periodo_solicitado(
-
-                    df_dia,
-                    fecha_actual,
-                    fecha_actual
-
+                dataframes.append(
+                    df_dia
                 )
-
-
-                if not df_dia.empty:
-
-                    dataframes.append(
-                        df_dia
-                    )
 
 
         except Exception as e:
 
             errores_dias.append(
+
                 (
+
                     fecha_actual,
+
                     str(e)
+
                 )
+
             )
 
 
-        fecha_actual += timedelta(
-            days=1
+        fecha_actual += (
+            timedelta(days=1)
         )
 
-
-    # Guardamos días problemáticos
-    # para mostrarlos en la interfaz.
 
     st.session_state[
         "rndc_errores_dias"
     ] = errores_dias
 
 
+    st.session_state[
+        "rndc_estrategias_usadas"
+    ] = estrategias_usadas
+
+
     if not dataframes:
+
         return pd.DataFrame()
 
 
@@ -816,7 +1068,9 @@ def consultar_periodo_grande(
 
     dataframe.columns = [
 
-        str(columna).upper()
+        str(
+            columna
+        ).upper()
 
         for columna
 
@@ -825,7 +1079,15 @@ def consultar_periodo_grande(
     ]
 
 
-    if "INGRESOID" in dataframe.columns:
+    if (
+
+        "INGRESOID"
+
+        in
+
+        dataframe.columns
+
+    ):
 
         dataframe = dataframe.drop_duplicates(
 
@@ -870,12 +1132,13 @@ def conectar_snowflake():
 
 
 # =============================================================================
-# CREAR O ACTUALIZAR TABLA
+# PREPARAR TABLA SNOWFLAKE
 # =============================================================================
 
 def preparar_tabla_snowflake(
 
     conexion,
+
     dataframe
 
 ):
@@ -885,9 +1148,6 @@ def preparar_tabla_snowflake(
 
     try:
 
-        # =============================================================
-        # CREAR TABLA
-        # =============================================================
 
         columnas_sql = [
 
@@ -922,10 +1182,6 @@ def preparar_tabla_snowflake(
         )
 
 
-        # =============================================================
-        # CONSULTAR COLUMNAS EXISTENTES
-        # =============================================================
-
         sql_columnas = f"""
 
         SELECT COLUMN_NAME
@@ -958,20 +1214,22 @@ def preparar_tabla_snowflake(
         }
 
 
-        # =============================================================
-        # AGREGAR COLUMNAS NUEVAS
-        # =============================================================
-
         columnas_agregadas = []
 
 
         for columna in dataframe.columns:
 
+
             if (
+
                 columna.upper()
+
                 not in
+
                 columnas_existentes
+
             ):
+
 
                 sql_agregar_columna = f"""
 
@@ -1005,27 +1263,152 @@ def preparar_tabla_snowflake(
 
 
 # =============================================================================
+# ELIMINAR REGISTROS EXISTENTES
+# =============================================================================
+
+def eliminar_registros_existentes(
+
+    conexion,
+
+    dataframe
+
+):
+
+    if dataframe.empty:
+
+        return
+
+
+    if (
+
+        "INGRESOID"
+
+        not in
+
+        dataframe.columns
+
+    ):
+
+        return
+
+
+    ingresos_ids = (
+
+        dataframe[
+            "INGRESOID"
+        ]
+
+        .dropna()
+
+        .astype(str)
+
+        .unique()
+
+        .tolist()
+
+    )
+
+
+    if not ingresos_ids:
+
+        return
+
+
+    cursor = conexion.cursor()
+
+
+    try:
+
+
+        tamanio_lote = 500
+
+
+        for inicio in range(
+
+            0,
+
+            len(
+                ingresos_ids
+            ),
+
+            tamanio_lote
+
+        ):
+
+
+            lote = ingresos_ids[
+
+                inicio:
+
+                inicio + tamanio_lote
+
+            ]
+
+
+            valores_sql = ", ".join(
+
+                "'" +
+
+                valor.replace(
+
+                    "'",
+
+                    "''"
+
+                )
+
+                +
+
+                "'"
+
+                for valor
+
+                in lote
+
+            )
+
+
+            sql_delete = f"""
+
+            DELETE FROM
+
+            {SNOWFLAKE_DATABASE}.
+            {SNOWFLAKE_SCHEMA}.
+            {SNOWFLAKE_TABLE}
+
+            WHERE "INGRESOID" IN
+
+            (
+
+                {valores_sql}
+
+            )
+
+            """
+
+
+            cursor.execute(
+                sql_delete
+            )
+
+
+    finally:
+
+        cursor.close()
+
+
+# =============================================================================
 # CARGAR DATAFRAME A SNOWFLAKE
-# REEMPLAZANDO TODA LA INFORMACIÓN
 # =============================================================================
 
 def cargar_dataframe_snowflake(
     dataframe
 ):
 
-    # =====================================================================
-    # SEGURIDAD:
-    # NUNCA REEMPLAZAR SNOWFLAKE
-    # CON UNA DESCARGA VACÍA
-    # =====================================================================
-
     if dataframe.empty:
 
         raise Exception(
-
-            "No hay registros para cargar. "
-            "Snowflake NO será reemplazado."
-
+            "No hay registros para cargar."
         )
 
 
@@ -1034,20 +1417,15 @@ def cargar_dataframe_snowflake(
 
     try:
 
-        # =================================================================
-        # COPIA DEL DATAFRAME
-        # =================================================================
 
         df_snowflake = dataframe.copy()
 
 
-        # =================================================================
-        # COLUMNAS EN MAYÚSCULAS
-        # =================================================================
-
         df_snowflake.columns = [
 
-            str(columna).upper()
+            str(
+                columna
+            ).upper()
 
             for columna
 
@@ -1056,94 +1434,44 @@ def cargar_dataframe_snowflake(
         ]
 
 
-        # =================================================================
-        # CONVERTIR VALORES A TEXTO
-        # =================================================================
-
         for columna in df_snowflake.columns:
 
-            df_snowflake[columna] = (
 
-                df_snowflake[columna]
-                .astype("string")
+            df_snowflake[
+                columna
+            ] = (
 
-            )
+                df_snowflake[
+                    columna
+                ]
 
-
-        registros_app = len(
-            df_snowflake
-        )
-
-
-        if registros_app <= 0:
-
-            raise Exception(
-
-                "La descarga no contiene registros. "
-                "Snowflake NO será reemplazado."
+                .astype(
+                    "string"
+                )
 
             )
 
-
-        # =================================================================
-        # CONECTAR A SNOWFLAKE
-        # =================================================================
 
         conexion = conectar_snowflake()
 
 
-        # =================================================================
-        # PREPARAR TABLA
-        # =================================================================
-
         columnas_agregadas = preparar_tabla_snowflake(
 
             conexion,
+
             df_snowflake
 
         )
 
 
-        # =================================================================
-        # REEMPLAZAR COMPLETAMENTE LA INFORMACIÓN
-        #
-        # IMPORTANTE:
-        #
-        # Antes el código eliminaba solamente
-        # los INGRESOID recibidos y conservaba
-        # registros antiguos.
-        #
-        # Ahora la tabla queda exactamente igual
-        # a la descarga actual de la App.
-        # =================================================================
+        eliminar_registros_existentes(
 
-        cursor = conexion.cursor()
+            conexion,
 
+            df_snowflake
 
-        try:
+        )
 
-            cursor.execute(
-
-                f"""
-
-                TRUNCATE TABLE
-                {SNOWFLAKE_DATABASE}.
-                {SNOWFLAKE_SCHEMA}.
-                {SNOWFLAKE_TABLE}
-
-                """
-
-            )
-
-
-        finally:
-
-            cursor.close()
-
-
-        # =================================================================
-        # CARGAR LA NUEVA DESCARGA
-        # =================================================================
 
         success, chunks, rows, output = write_pandas(
 
@@ -1176,68 +1504,10 @@ def cargar_dataframe_snowflake(
             )
 
 
-        # =================================================================
-        # VERIFICAR EL TOTAL REAL EN SNOWFLAKE
-        # =================================================================
-
-        cursor = conexion.cursor()
-
-
-        try:
-
-            cursor.execute(
-
-                f"""
-
-                SELECT COUNT(*)
-
-                FROM
-                {SNOWFLAKE_DATABASE}.
-                {SNOWFLAKE_SCHEMA}.
-                {SNOWFLAKE_TABLE}
-
-                """
-
-            )
-
-
-            registros_snowflake = (
-                cursor.fetchone()[0]
-            )
-
-
-        finally:
-
-            cursor.close()
-
-
-        # =================================================================
-        # VALIDAR QUE SNOWFLAKE CONTIENE EXACTAMENTE
-        # LO MISMO QUE LA APP
-        # =================================================================
-
-        if registros_snowflake != registros_app:
-
-            raise Exception(
-
-                f"Error de validación: "
-                f"la App descargó {registros_app} registros "
-                f"pero Snowflake contiene "
-                f"{registros_snowflake}."
-
-            )
-
-
         return {
 
             "rows":
             rows,
-
-            "registros_app":
-            registros_app,
-
-            "registros_snowflake":
-            registros_snowflake,
 
             "columnas_agregadas":
             columnas_agregadas
@@ -1246,6 +1516,7 @@ def cargar_dataframe_snowflake(
 
 
     finally:
+
 
         if conexion is not None:
 
@@ -1314,7 +1585,10 @@ configuracion_secrets = {
 }
 
 
-for nombre, valor in configuracion_secrets.items():
+for nombre, valor in (
+    configuracion_secrets.items()
+):
+
 
     if not valor:
 
@@ -1325,13 +1599,18 @@ for nombre, valor in configuracion_secrets.items():
 
 if secrets_faltantes:
 
+
     st.error(
         "❌ Faltan Secrets de configuración."
     )
 
 
     st.code(
-        "\n".join(secrets_faltantes)
+
+        "\n".join(
+            secrets_faltantes
+        )
+
     )
 
 
@@ -1349,12 +1628,14 @@ columna1, columna2 = st.columns(
 
 with columna1:
 
+
     fecha_inicio = st.date_input(
         "Fecha inicial"
     )
 
 
 with columna2:
+
 
     fecha_fin = st.date_input(
         "Fecha final"
@@ -1381,11 +1662,9 @@ boton_consultar = st.button(
 
 if boton_consultar:
 
-    # =========================================================================
-    # VALIDAR FECHAS
-    # =========================================================================
 
     if fecha_fin < fecha_inicio:
+
 
         st.error(
 
@@ -1394,26 +1673,21 @@ if boton_consultar:
 
         )
 
+
         st.stop()
 
 
     try:
 
-        # =====================================================================
-        # CREAR CONSULTA
-        # =====================================================================
 
         consulta = ConsultaRNDC(
 
             RNDC_USERNAME,
+
             RNDC_PASSWORD
 
         )
 
-
-        # =====================================================================
-        # COMPONENTES DE PROGRESO
-        # =====================================================================
 
         mensaje_progreso = st.empty()
 
@@ -1425,20 +1699,31 @@ if boton_consultar:
         def actualizar_progreso(
 
             indice,
+
             total,
+
             inicio,
+
             fin
 
         ):
 
+
             porcentaje = int(
 
                 (
+
                     (indice - 1)
+
                     /
+
                     total
+
                 )
-                * 100
+
+                *
+
+                100
 
             )
 
@@ -1446,8 +1731,11 @@ if boton_consultar:
             barra_progreso.progress(
 
                 max(
+
                     1,
+
                     porcentaje
+
                 )
 
             )
@@ -1455,18 +1743,18 @@ if boton_consultar:
 
             mensaje_progreso.info(
 
-                f"Consultando bloque "
+                f"Consultando día "
+
                 f"{indice} de {total}: "
+
                 f"{inicio.strftime('%Y/%m/%d')} "
+
                 f"a "
+
                 f"{fin.strftime('%Y/%m/%d')}"
 
             )
 
-
-        # =====================================================================
-        # CONSULTAR RNDC
-        # =====================================================================
 
         with st.spinner(
 
@@ -1474,11 +1762,15 @@ if boton_consultar:
 
         ):
 
+
             dataframe = consultar_periodo_grande(
 
                 consulta,
+
                 fecha_inicio,
+
                 fecha_fin,
+
                 actualizar_progreso
 
             )
@@ -1491,16 +1783,13 @@ if boton_consultar:
 
         mensaje_progreso.success(
 
-            "✅ Consulta de todos los bloques terminada."
+            "✅ Consulta de todos los días terminada."
 
         )
 
 
-        # =====================================================================
-        # VALIDAR RESULTADO
-        # =====================================================================
-
         if dataframe.empty:
+
 
             st.warning(
 
@@ -1509,22 +1798,21 @@ if boton_consultar:
 
             )
 
+
             st.stop()
 
-
-        # =====================================================================
-        # AVISAR DÍAS CON ERROR
-        # =====================================================================
 
         errores_dias = st.session_state.get(
 
             "rndc_errores_dias",
+
             []
 
         )
 
 
         if errores_dias:
+
 
             dias_error = ", ".join(
 
@@ -1539,20 +1827,100 @@ if boton_consultar:
 
             st.warning(
 
-                "⚠️ Se descargaron los demás días, "
-                "pero el RNDC devolvió error en: "
+                "⚠️ Algunos días no pudieron recuperarse "
+                "después de todas las estrategias del Proceso 4: "
+
                 f"{dias_error}"
 
             )
 
 
-        # =====================================================================
-        # COLUMNAS EN MAYÚSCULAS
-        # =====================================================================
+        estrategias_usadas = st.session_state.get(
+
+            "rndc_estrategias_usadas",
+
+            []
+
+        )
+
+
+        estrategias_respaldo = [
+
+            (
+
+                fecha,
+
+                estrategia,
+
+                registros
+
+            )
+
+            for (
+
+                fecha,
+
+                estrategia,
+
+                registros
+
+            )
+
+            in estrategias_usadas
+
+            if estrategia != "normal"
+
+        ]
+
+
+        if estrategias_respaldo:
+
+
+            detalle = pd.DataFrame(
+
+                estrategias_respaldo,
+
+                columns=[
+
+                    "FECHA",
+
+                    "ESTRATEGIA",
+
+                    "REGISTROS"
+
+                ]
+
+            )
+
+
+            st.info(
+
+                "🔄 Algunos días requirieron "
+                "una ventana alternativa del Proceso 4."
+
+            )
+
+
+            with st.expander(
+
+                "Ver detalle de estrategias utilizadas"
+
+            ):
+
+                st.dataframe(
+
+                    detalle,
+
+                    use_container_width=True
+
+                )
+
 
         dataframe.columns = [
 
-            str(columna).upper()
+            str(
+                columna
+            ).upper()
 
             for columna
 
@@ -1561,16 +1929,21 @@ if boton_consultar:
         ]
 
 
-        # =====================================================================
-        # DUPLICADOS
-        # =====================================================================
-
         registros_antes = len(
             dataframe
         )
 
 
-        if "INGRESOID" in dataframe.columns:
+        if (
+
+            "INGRESOID"
+
+            in
+
+            dataframe.columns
+
+        ):
+
 
             dataframe = dataframe.drop_duplicates(
 
@@ -1589,19 +1962,20 @@ if boton_consultar:
 
 
         duplicados = (
+
             registros_antes
+
             -
+
             registros_finales
+
         )
 
-
-        # =====================================================================
-        # MOSTRAR RESULTADOS
-        # =====================================================================
 
         st.success(
 
             f"✅ Consulta RNDC exitosa: "
+
             f"{registros_finales} registros encontrados."
 
         )
@@ -1615,6 +1989,7 @@ if boton_consultar:
         col1.metric(
 
             "Registros RNDC",
+
             registros_antes
 
         )
@@ -1623,6 +1998,7 @@ if boton_consultar:
         col2.metric(
 
             "Duplicados eliminados",
+
             duplicados
 
         )
@@ -1631,14 +2007,11 @@ if boton_consultar:
         col3.metric(
 
             "Registros finales",
+
             registros_finales
 
         )
 
-
-        # =====================================================================
-        # VISTA PREVIA
-        # =====================================================================
 
         st.subheader(
             "Vista previa de los datos"
@@ -1654,58 +2027,40 @@ if boton_consultar:
         )
 
 
-        # =====================================================================
-        # CARGAR SNOWFLAKE
-        # =====================================================================
-
         with st.spinner(
 
             "Cargando información a Snowflake..."
 
         ):
 
+
             resultado = cargar_dataframe_snowflake(
+
                 dataframe
+
             )
 
-
-        # =====================================================================
-        # RESULTADO FINAL
-        # =====================================================================
 
         st.success(
             "🎉 CARGA EXITOSA EN SNOWFLAKE"
         )
 
 
-        col1, col2, col3 = st.columns(
-            3
+        col1, col2 = st.columns(
+            2
         )
 
 
         col1.metric(
 
-            "Registros descargados por la App",
+            "Registros cargados",
 
-            resultado[
-                "registros_app"
-            ]
+            resultado["rows"]
 
         )
 
 
         col2.metric(
-
-            "Registros en Snowflake",
-
-            resultado[
-                "registros_snowflake"
-            ]
-
-        )
-
-
-        col3.metric(
 
             "Columnas nuevas",
 
@@ -1723,6 +2078,7 @@ if boton_consultar:
         if resultado[
             "columnas_agregadas"
         ]:
+
 
             st.info(
 
@@ -1742,6 +2098,7 @@ if boton_consultar:
 
 
     except Exception as e:
+
 
         st.error(
             "❌ Ocurrió un error"
