@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import re
 from datetime import timedelta
 
@@ -14,10 +12,6 @@ import snowflake.connector
 from snowflake.connector.pandas_tools import write_pandas
 
 
-# =============================================================================
-# CONFIGURACIÓN DE LA PÁGINA
-# =============================================================================
-
 st.set_page_config(
     page_title="RNDC → Snowflake",
     page_icon="🚛",
@@ -26,7 +20,7 @@ st.set_page_config(
 
 
 # =============================================================================
-# FUNCIÓN PARA LEER SECRETS
+# SECRETS
 # =============================================================================
 
 def obtener_secret(nombre):
@@ -61,7 +55,7 @@ SNOWFLAKE_SCHEMA = obtener_secret("SNOWFLAKE_SCHEMA")
 
 
 # =============================================================================
-# TABLA SNOWFLAKE
+# TABLA
 # =============================================================================
 
 SNOWFLAKE_TABLE = "MANIFIESTOS_PROCESO4"
@@ -78,10 +72,7 @@ URL_RNDC = (
 
 
 # =============================================================================
-# VARIABLES DEL PROCESO 4
-#
-# SOLO PROCESO 4
-# CONSECUTIVOREMESA QUEDA EXCLUIDO
+# VARIABLES PROCESO 4
 # =============================================================================
 
 VARIABLES_PROCESO4 = [
@@ -121,7 +112,7 @@ VARIABLES_PROCESO4 = [
 
 
 # =============================================================================
-# CLASE CONSULTA RNDC
+# CONSULTA RNDC
 # =============================================================================
 
 class ConsultaRNDC:
@@ -137,11 +128,6 @@ class ConsultaRNDC:
         self.session = requests.Session()
 
 
-    # =========================================================================
-    # CONSULTAR MANIFIESTOS
-    # PROCESO 4
-    # =========================================================================
-
     def consultar_manifiestos(
 
         self,
@@ -156,11 +142,8 @@ class ConsultaRNDC:
         )
 
 
-        # =====================================================================
-        # XML RNDC
-        # =====================================================================
-
-        body = f"""<root>
+        body = f"""
+<root>
 
 <acceso>
 
@@ -189,7 +172,9 @@ class ConsultaRNDC:
 
 <documento>
 
-<NUMNITEMPRESATRANSPORTE>{nit_empresa}</NUMNITEMPRESATRANSPORTE>
+<NUMNITEMPRESATRANSPORTE>
+{nit_empresa}
+</NUMNITEMPRESATRANSPORTE>
 
 </documento>
 
@@ -203,12 +188,9 @@ class ConsultaRNDC:
 </documentorango>
 
 
-</root>"""
+</root>
+"""
 
-
-        # =====================================================================
-        # SOAP
-        # =====================================================================
 
         xml_request = f"""<?xml version='1.0' encoding='ISO-8859-1'?>
 
@@ -218,7 +200,7 @@ xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
 
 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 
-xmlns:xsd="http://www.w3.org/2001/XMLSchema-instance">
+xmlns:xsd="http://www.w3.org/2001/XMLSchema">
 
 
 <SOAP-ENV:Body>
@@ -240,10 +222,6 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
 
 </SOAP-ENV:Envelope>"""
 
-
-        # =====================================================================
-        # CONSULTAR RNDC
-        # =====================================================================
 
         try:
 
@@ -306,10 +284,6 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
             )
 
 
-    # =========================================================================
-    # PROCESAR RESPUESTA
-    # =========================================================================
-
     def _procesar_respuesta(
 
         self,
@@ -323,10 +297,6 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
                 respuesta_xml
             )
 
-
-            # =============================================================
-            # SOAP FAULT
-            # =============================================================
 
             fault = root.find(
 
@@ -358,10 +328,6 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
                 )
 
 
-            # =============================================================
-            # RETURN
-            # =============================================================
-
             nodo_return = root.find(
                 ".//return"
             )
@@ -386,10 +352,6 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
             )
 
 
-            # =============================================================
-            # ERROR RNDC
-            # =============================================================
-
             error = root_rndc.find(
                 ".//ErrorMSG"
             )
@@ -403,7 +365,6 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
                 ).strip()
 
 
-                # RNDC11 = no hay documentos
                 if (
                     "RNDC11"
                     in mensaje_error
@@ -420,11 +381,8 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
                 )
 
 
-            # =============================================================
-            # EXTRAER DOCUMENTOS
-            # =============================================================
-
             registros = []
+
 
             documentos = root_rndc.findall(
                 ".//documento"
@@ -435,12 +393,14 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
 
                 registro = {}
 
+
                 for campo in doc:
 
                     nombre = (
                         campo.tag
                         .split("}")[-1]
                     )
+
 
                     registro[nombre] = (
                         campo.text
@@ -469,6 +429,7 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
 
             mensaje = str(e)
 
+
             if mensaje.startswith(
                 "Error RNDC:"
             ):
@@ -483,10 +444,6 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
             )
 
 
-    # =========================================================================
-    # CONVERTIR A DATAFRAME
-    # =========================================================================
-
     def consultar_dataframe(
 
         self,
@@ -496,15 +453,11 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
 
     ):
 
-        registros = (
+        registros = self.consultar_manifiestos(
 
-            self.consultar_manifiestos(
-
-                nit_empresa,
-                fecha_inicio,
-                fecha_fin
-
-            )
+            nit_empresa,
+            fecha_inicio,
+            fecha_fin
 
         )
 
@@ -515,15 +468,17 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
 
 
 # =============================================================================
-# EXTRAER FECHA DE FECHAING
+# EXTRAER FECHA
 # =============================================================================
 
 def extraer_fecha(valor):
 
     if (
         valor is None
-        or pd.isna(valor)
+        or
+        pd.isna(valor)
     ):
+
         return None
 
 
@@ -531,10 +486,6 @@ def extraer_fecha(valor):
         valor
     ).strip()
 
-
-    # =========================================================================
-    # FORMATO DD/MM/YYYY
-    # =========================================================================
 
     coincidencia = re.search(
 
@@ -559,12 +510,9 @@ def extraer_fecha(valor):
 
 
         if pd.notna(fecha):
+
             return fecha.date()
 
-
-    # =========================================================================
-    # FORMATO YYYY/MM/DD
-    # =========================================================================
 
     coincidencia = re.search(
 
@@ -587,12 +535,9 @@ def extraer_fecha(valor):
 
 
         if pd.notna(fecha):
+
             return fecha.date()
 
-
-    # =========================================================================
-    # ÚLTIMO INTENTO
-    # =========================================================================
 
     fecha = pd.to_datetime(
 
@@ -606,6 +551,7 @@ def extraer_fecha(valor):
 
 
     if pd.notna(fecha):
+
         return fecha.date()
 
 
@@ -613,7 +559,11 @@ def extraer_fecha(valor):
 
 
 # =============================================================================
-# FILTRAR EXACTAMENTE EL PERÍODO SOLICITADO
+# FILTRO ORIGINAL
+#
+# SE CONSERVA LA FUNCIÓN POR COMPATIBILIDAD,
+# PERO YA NO SE USA PARA DESCARTAR LA RESPUESTA
+# DEL RNDC EN LA CONSULTA PRINCIPAL.
 # =============================================================================
 
 def filtrar_periodo_solicitado(
@@ -625,6 +575,7 @@ def filtrar_periodo_solicitado(
 ):
 
     if dataframe.empty:
+
         return dataframe
 
 
@@ -640,18 +591,20 @@ def filtrar_periodo_solicitado(
         ):
 
             columna_fecha = columna
+
             break
 
 
-    # Si RNDC no devolvió FECHAING
-    # no eliminamos registros
     if columna_fecha is None:
+
         return dataframe
 
 
     fechas = (
+
         dataframe[columna_fecha]
         .apply(extraer_fecha)
+
     )
 
 
@@ -673,72 +626,99 @@ def filtrar_periodo_solicitado(
 
 
     return (
+
         dataframe
         .loc[mascara]
         .copy()
+
     )
 
 
 # =============================================================================
-# CONSULTAR PERÍODOS GRANDES
+# CONSULTAR PERÍODO
 #
-# SIGUE SIENDO EXCLUSIVAMENTE EL PROCESO 4.
+# CAMBIO PRINCIPAL:
+#
+# CONSULTA:
+# día → día siguiente
+#
+# PERO NO VUELVE A FILTRAR LOCALMENTE POR FECHA.
 # =============================================================================
 
 def consultar_periodo_grande(
+
     consulta,
     fecha_inicio,
     fecha_fin,
     callback_progreso=None
+
 ):
 
-    """
-    Consulta cada día como [día, día + 1] y después filtra exactamente
-    los registros del día solicitado.
-
-    Si un día produce un error del RNDC, se registra el error y se continúa
-    con los demás días para que un solo día problemático no destruya toda
-    la descarga del período.
-    """
-
     dataframes = []
+
     errores_dias = []
 
+
     total_dias = (
-        fecha_fin - fecha_inicio
+
+        fecha_fin
+        -
+        fecha_inicio
+
     ).days + 1
 
+
     fecha_actual = fecha_inicio
+
     indice = 0
 
 
     while fecha_actual <= fecha_fin:
 
+
         indice += 1
 
+
         siguiente_dia = (
+
             fecha_actual
             +
             timedelta(days=1)
+
         )
 
 
         if callback_progreso is not None:
 
             callback_progreso(
+
                 indice,
                 total_dias,
                 fecha_actual,
                 siguiente_dia
+
             )
 
 
+        # =============================================================
+        # FECHAS EXACTAMENTE COMO EL CÓDIGO VIEJO
+        #
+        # Ejemplo para consultar el 05:
+        #
+        # 2026/08/05 → 2026/08/06
+        # =============================================================
+
         inicio_rndc = fecha_actual.strftime(
+
             "%Y/%m/%d"
+
         )
 
+
         fin_rndc = siguiente_dia.strftime(
+
             "%Y/%m/%d"
+
         )
 
 
@@ -755,34 +735,28 @@ def consultar_periodo_grande(
 
             if not df_dia.empty:
 
-                # RNDC puede devolver registros
-                # del día siguiente.
-                # Conservamos solamente
-                # el día solicitado.
+                # =====================================================
+                # IMPORTANTE
+                #
+                # Ya NO filtramos nuevamente por FECHAING.
+                #
+                # Si RNDC devolvió los registros, los conservamos.
+                # =====================================================
 
-                df_dia = filtrar_periodo_solicitado(
-
-                    df_dia,
-                    fecha_actual,
-                    fecha_actual
-
+                dataframes.append(
+                    df_dia
                 )
-
-
-                if not df_dia.empty:
-
-                    dataframes.append(
-                        df_dia
-                    )
 
 
         except Exception as e:
 
             errores_dias.append(
+
                 (
                     fecha_actual,
                     str(e)
                 )
+
             )
 
 
@@ -791,15 +765,13 @@ def consultar_periodo_grande(
         )
 
 
-    # Guardamos días problemáticos
-    # para mostrarlos en la interfaz.
-
     st.session_state[
         "rndc_errores_dias"
     ] = errores_dias
 
 
     if not dataframes:
+
         return pd.DataFrame()
 
 
@@ -842,7 +814,7 @@ def consultar_periodo_grande(
 
 
 # =============================================================================
-# CONECTAR A SNOWFLAKE
+# CONECTAR SNOWFLAKE
 # =============================================================================
 
 def conectar_snowflake():
@@ -870,7 +842,7 @@ def conectar_snowflake():
 
 
 # =============================================================================
-# CREAR O ACTUALIZAR TABLA
+# PREPARAR TABLA
 # =============================================================================
 
 def preparar_tabla_snowflake(
@@ -884,10 +856,6 @@ def preparar_tabla_snowflake(
 
 
     try:
-
-        # =============================================================
-        # CREAR TABLA
-        # =============================================================
 
         columnas_sql = [
 
@@ -910,7 +878,7 @@ def preparar_tabla_snowflake(
 
         (
 
-            {", ".join(columnas_sql)}
+            {', '.join(columnas_sql)}
 
         )
 
@@ -921,10 +889,6 @@ def preparar_tabla_snowflake(
             sql_crear_tabla
         )
 
-
-        # =============================================================
-        # CONSULTAR COLUMNAS EXISTENTES
-        # =============================================================
 
         sql_columnas = f"""
 
@@ -958,22 +922,16 @@ def preparar_tabla_snowflake(
         }
 
 
-        # =============================================================
-        # AGREGAR COLUMNAS NUEVAS
-        # =============================================================
-
         columnas_agregadas = []
 
 
         for columna in dataframe.columns:
 
-            if (
-                columna.upper()
-                not in
-                columnas_existentes
-            ):
 
-                sql_agregar_columna = f"""
+            if columna.upper() not in columnas_existentes:
+
+
+                sql_agregar_columna = f'''
 
                 ALTER TABLE
 
@@ -983,7 +941,7 @@ def preparar_tabla_snowflake(
 
                 ADD COLUMN "{columna}" VARCHAR
 
-                """
+                '''
 
 
                 cursor.execute(
@@ -1005,19 +963,12 @@ def preparar_tabla_snowflake(
 
 
 # =============================================================================
-# CARGAR DATAFRAME A SNOWFLAKE
-# REEMPLAZANDO TODA LA INFORMACIÓN
+# CARGAR SNOWFLAKE
 # =============================================================================
 
 def cargar_dataframe_snowflake(
     dataframe
 ):
-
-    # =====================================================================
-    # SEGURIDAD:
-    # NUNCA REEMPLAZAR SNOWFLAKE
-    # CON UNA DESCARGA VACÍA
-    # =====================================================================
 
     if dataframe.empty:
 
@@ -1034,16 +985,8 @@ def cargar_dataframe_snowflake(
 
     try:
 
-        # =================================================================
-        # COPIA DEL DATAFRAME
-        # =================================================================
-
         df_snowflake = dataframe.copy()
 
-
-        # =================================================================
-        # COLUMNAS EN MAYÚSCULAS
-        # =================================================================
 
         df_snowflake.columns = [
 
@@ -1055,10 +998,6 @@ def cargar_dataframe_snowflake(
 
         ]
 
-
-        # =================================================================
-        # CONVERTIR VALORES A TEXTO
-        # =================================================================
 
         for columna in df_snowflake.columns:
 
@@ -1085,16 +1024,8 @@ def cargar_dataframe_snowflake(
             )
 
 
-        # =================================================================
-        # CONECTAR A SNOWFLAKE
-        # =================================================================
-
         conexion = conectar_snowflake()
 
-
-        # =================================================================
-        # PREPARAR TABLA
-        # =================================================================
 
         columnas_agregadas = preparar_tabla_snowflake(
 
@@ -1103,19 +1034,6 @@ def cargar_dataframe_snowflake(
 
         )
 
-
-        # =================================================================
-        # REEMPLAZAR COMPLETAMENTE LA INFORMACIÓN
-        #
-        # IMPORTANTE:
-        #
-        # Antes el código eliminaba solamente
-        # los INGRESOID recibidos y conservaba
-        # registros antiguos.
-        #
-        # Ahora la tabla queda exactamente igual
-        # a la descarga actual de la App.
-        # =================================================================
 
         cursor = conexion.cursor()
 
@@ -1127,6 +1045,7 @@ def cargar_dataframe_snowflake(
                 f"""
 
                 TRUNCATE TABLE
+
                 {SNOWFLAKE_DATABASE}.
                 {SNOWFLAKE_SCHEMA}.
                 {SNOWFLAKE_TABLE}
@@ -1140,10 +1059,6 @@ def cargar_dataframe_snowflake(
 
             cursor.close()
 
-
-        # =================================================================
-        # CARGAR LA NUEVA DESCARGA
-        # =================================================================
 
         success, chunks, rows, output = write_pandas(
 
@@ -1176,10 +1091,6 @@ def cargar_dataframe_snowflake(
             )
 
 
-        # =================================================================
-        # VERIFICAR EL TOTAL REAL EN SNOWFLAKE
-        # =================================================================
-
         cursor = conexion.cursor()
 
 
@@ -1192,6 +1103,7 @@ def cargar_dataframe_snowflake(
                 SELECT COUNT(*)
 
                 FROM
+
                 {SNOWFLAKE_DATABASE}.
                 {SNOWFLAKE_SCHEMA}.
                 {SNOWFLAKE_TABLE}
@@ -1202,7 +1114,9 @@ def cargar_dataframe_snowflake(
 
 
             registros_snowflake = (
+
                 cursor.fetchone()[0]
+
             )
 
 
@@ -1210,11 +1124,6 @@ def cargar_dataframe_snowflake(
 
             cursor.close()
 
-
-        # =================================================================
-        # VALIDAR QUE SNOWFLAKE CONTIENE EXACTAMENTE
-        # LO MISMO QUE LA APP
-        # =================================================================
 
         if registros_snowflake != registros_app:
 
@@ -1381,9 +1290,6 @@ boton_consultar = st.button(
 
 if boton_consultar:
 
-    # =========================================================================
-    # VALIDAR FECHAS
-    # =========================================================================
 
     if fecha_fin < fecha_inicio:
 
@@ -1394,14 +1300,12 @@ if boton_consultar:
 
         )
 
+
         st.stop()
 
 
     try:
 
-        # =====================================================================
-        # CREAR CONSULTA
-        # =====================================================================
 
         consulta = ConsultaRNDC(
 
@@ -1411,11 +1315,8 @@ if boton_consultar:
         )
 
 
-        # =====================================================================
-        # COMPONENTES DE PROGRESO
-        # =====================================================================
-
         mensaje_progreso = st.empty()
+
 
         barra_progreso = st.progress(
             0
@@ -1464,10 +1365,6 @@ if boton_consultar:
             )
 
 
-        # =====================================================================
-        # CONSULTAR RNDC
-        # =====================================================================
-
         with st.spinner(
 
             "Consultando información en RNDC..."
@@ -1496,10 +1393,6 @@ if boton_consultar:
         )
 
 
-        # =====================================================================
-        # VALIDAR RESULTADO
-        # =====================================================================
-
         if dataframe.empty:
 
             st.warning(
@@ -1509,12 +1402,9 @@ if boton_consultar:
 
             )
 
+
             st.stop()
 
-
-        # =====================================================================
-        # AVISAR DÍAS CON ERROR
-        # =====================================================================
 
         errores_dias = st.session_state.get(
 
@@ -1546,10 +1436,6 @@ if boton_consultar:
             )
 
 
-        # =====================================================================
-        # COLUMNAS EN MAYÚSCULAS
-        # =====================================================================
-
         dataframe.columns = [
 
             str(columna).upper()
@@ -1560,10 +1446,6 @@ if boton_consultar:
 
         ]
 
-
-        # =====================================================================
-        # DUPLICADOS
-        # =====================================================================
 
         registros_antes = len(
             dataframe
@@ -1589,15 +1471,13 @@ if boton_consultar:
 
 
         duplicados = (
+
             registros_antes
             -
             registros_finales
+
         )
 
-
-        # =====================================================================
-        # MOSTRAR RESULTADOS
-        # =====================================================================
 
         st.success(
 
@@ -1636,10 +1516,6 @@ if boton_consultar:
         )
 
 
-        # =====================================================================
-        # VISTA PREVIA
-        # =====================================================================
-
         st.subheader(
             "Vista previa de los datos"
         )
@@ -1654,10 +1530,6 @@ if boton_consultar:
         )
 
 
-        # =====================================================================
-        # CARGAR SNOWFLAKE
-        # =====================================================================
-
         with st.spinner(
 
             "Cargando información a Snowflake..."
@@ -1668,10 +1540,6 @@ if boton_consultar:
                 dataframe
             )
 
-
-        # =====================================================================
-        # RESULTADO FINAL
-        # =====================================================================
 
         st.success(
             "🎉 CARGA EXITOSA EN SNOWFLAKE"
