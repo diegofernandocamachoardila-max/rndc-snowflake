@@ -3,6 +3,11 @@ import pandas as pd
 import streamlit as st
 import snowflake.connector
 
+
+# ============================================================
+# CONFIGURACIÓN
+# ============================================================
+
 st.set_page_config(
     page_title="RNDC Bot",
     page_icon="🤖",
@@ -12,7 +17,12 @@ st.set_page_config(
 SNOWFLAKE_TABLE = "MANIFIESTOS_PROCESO4"
 
 
+# ============================================================
+# CONEXIÓN A SNOWFLAKE
+# ============================================================
+
 def conectar_snowflake():
+
     return snowflake.connector.connect(
         account=st.secrets["SNOWFLAKE_ACCOUNT"],
         user=st.secrets["SNOWFLAKE_USER"],
@@ -24,11 +34,17 @@ def conectar_snowflake():
     )
 
 
+# ============================================================
+# CONSULTA DEL MANIFIESTO
+# ============================================================
+
 def consultar_manifiesto(numero_manifiesto):
+
     conexion = None
     cursor = None
 
     try:
+
         conexion = conectar_snowflake()
         cursor = conexion.cursor()
 
@@ -46,7 +62,11 @@ def consultar_manifiesto(numero_manifiesto):
             (str(numero_manifiesto).strip(),)
         )
 
-        columnas = [d[0] for d in cursor.description]
+        columnas = [
+            descripcion[0]
+            for descripcion in cursor.description
+        ]
+
         registros = cursor.fetchall()
 
         return pd.DataFrame(
@@ -55,12 +75,17 @@ def consultar_manifiesto(numero_manifiesto):
         )
 
     finally:
+
         if cursor is not None:
             cursor.close()
 
         if conexion is not None:
             conexion.close()
 
+
+# ============================================================
+# OBTENER VALOR DE UN CAMPO
+# ============================================================
 
 def obtener_valor(df, nombres):
 
@@ -74,11 +99,20 @@ def obtener_valor(df, nombres):
 
                 texto = str(valor).strip()
 
-                if texto not in ("", "None", "nan"):
+                if texto not in (
+                    "",
+                    "None",
+                    "nan"
+                ):
+
                     return texto
 
     return "No disponible"
 
+
+# ============================================================
+# FORMATEAR VALOR DEL FLETE
+# ============================================================
 
 def formatear_flete(valor):
 
@@ -98,6 +132,10 @@ def formatear_flete(valor):
         return valor
 
 
+# ============================================================
+# EXTRAER NÚMERO DE MANIFIESTO
+# ============================================================
+
 def extraer_numero(texto):
 
     coincidencias = re.findall(
@@ -112,7 +150,267 @@ def extraer_numero(texto):
     return None
 
 
-def mostrar_respuesta_bot(df, numero):
+# ============================================================
+# IDENTIFICAR QUÉ ESTÁ PREGUNTANDO EL USUARIO
+# ============================================================
+
+def identificar_consulta(texto):
+
+    texto = texto.lower()
+
+    # PLACA
+    if any(
+        palabra in texto
+        for palabra in [
+            "placa",
+            "vehiculo",
+            "vehículo"
+        ]
+    ):
+
+        return "placa"
+
+
+    # REMOLQUE
+    if any(
+        palabra in texto
+        for palabra in [
+            "remolque",
+            "trailer",
+            "tráiler"
+        ]
+    ):
+
+        return "remolque"
+
+
+    # FLETE
+    if any(
+        palabra in texto
+        for palabra in [
+            "flete",
+            "valor del flete",
+            "valorflete",
+            "valor"
+        ]
+    ):
+
+        return "flete"
+
+
+    # ORIGEN
+    if any(
+        palabra in texto
+        for palabra in [
+            "origen",
+            "sale de",
+            "sale desde"
+        ]
+    ):
+
+        return "origen"
+
+
+    # DESTINO
+    if any(
+        palabra in texto
+        for palabra in [
+            "destino",
+            "va para",
+            "llega a"
+        ]
+    ):
+
+        return "destino"
+
+
+    # CONDUCTOR
+    if any(
+        palabra in texto
+        for palabra in [
+            "conductor",
+            "chofer",
+            "transportador"
+        ]
+    ):
+
+        return "conductor"
+
+
+    # FECHA
+    if any(
+        palabra in texto
+        for palabra in [
+            "fecha",
+            "cuando",
+            "cuándo"
+        ]
+    ):
+
+        return "fecha"
+
+
+    # RESUMEN GENERAL
+    return "resumen"
+
+
+# ============================================================
+# RESPUESTA SEGÚN LA PREGUNTA
+# ============================================================
+
+def responder_consulta(df, numero, tipo):
+
+
+    # --------------------------------------------------------
+    # PLACA
+    # --------------------------------------------------------
+
+    if tipo == "placa":
+
+        placa = obtener_valor(
+            df,
+            ["NUMPLACA"]
+        )
+
+        st.success(
+            f"🚛 La placa del manifiesto "
+            f"{numero} es **{placa}**."
+        )
+
+        return
+
+
+    # --------------------------------------------------------
+    # REMOLQUE
+    # --------------------------------------------------------
+
+    if tipo == "remolque":
+
+        remolque = obtener_valor(
+            df,
+            ["NUMPLACAREMOLQUE"]
+        )
+
+        st.success(
+            f"🚚 El remolque del manifiesto "
+            f"{numero} es **{remolque}**."
+        )
+
+        return
+
+
+    # --------------------------------------------------------
+    # FLETE
+    # --------------------------------------------------------
+
+    if tipo == "flete":
+
+        flete = obtener_valor(
+            df,
+            ["VALORFLETEPACTADOVIAJE"]
+        )
+
+        flete = formatear_flete(flete)
+
+        st.success(
+            f"💰 El valor del flete del manifiesto "
+            f"{numero} es **{flete}**."
+        )
+
+        return
+
+
+    # --------------------------------------------------------
+    # ORIGEN
+    # --------------------------------------------------------
+
+    if tipo == "origen":
+
+        origen = obtener_valor(
+            df,
+            [
+                "CODMUNICIPIOORIGENMANIFIESTO",
+                "MUNICIPIOORIGENMANIFIESTO"
+            ]
+        )
+
+        st.success(
+            f"📍 El origen del manifiesto "
+            f"{numero} es **{origen}**."
+        )
+
+        return
+
+
+    # --------------------------------------------------------
+    # DESTINO
+    # --------------------------------------------------------
+
+    if tipo == "destino":
+
+        destino = obtener_valor(
+            df,
+            [
+                "CODMUNICIPIODESTINOMANIFIESTO",
+                "MUNICIPIODESTINOMANIFIESTO"
+            ]
+        )
+
+        st.success(
+            f"📍 El destino del manifiesto "
+            f"{numero} es **{destino}**."
+        )
+
+        return
+
+
+    # --------------------------------------------------------
+    # CONDUCTOR
+    # --------------------------------------------------------
+
+    if tipo == "conductor":
+
+        conductor = obtener_valor(
+            df,
+            [
+                "NUMIDCONDUCTOR",
+                "NUMIDCONDUCTORPRINCIPAL"
+            ]
+        )
+
+        st.success(
+            f"👤 El conductor del manifiesto "
+            f"{numero} es **{conductor}**."
+        )
+
+        return
+
+
+    # --------------------------------------------------------
+    # FECHA
+    # --------------------------------------------------------
+
+    if tipo == "fecha":
+
+        fecha = obtener_valor(
+            df,
+            [
+                "FECHAING",
+                "FECHAEXPEDICIONMANIFIESTO"
+            ]
+        )
+
+        st.success(
+            f"📅 La fecha del manifiesto "
+            f"{numero} es **{fecha}**."
+        )
+
+        return
+
+
+    # ========================================================
+    # RESUMEN GENERAL
+    # ========================================================
 
     fecha = obtener_valor(
         df,
@@ -124,16 +422,12 @@ def mostrar_respuesta_bot(df, numero):
 
     placa = obtener_valor(
         df,
-        [
-            "NUMPLACA"
-        ]
+        ["NUMPLACA"]
     )
 
     remolque = obtener_valor(
         df,
-        [
-            "NUMPLACAREMOLQUE"
-        ]
+        ["NUMPLACAREMOLQUE"]
     )
 
     origen = obtener_valor(
@@ -162,12 +456,11 @@ def mostrar_respuesta_bot(df, numero):
 
     flete = obtener_valor(
         df,
-        [
-            "VALORFLETEPACTADOVIAJE"
-        ]
+        ["VALORFLETEPACTADOVIAJE"]
     )
 
     flete = formatear_flete(flete)
+
 
     st.success(
         f"✅ Manifiesto {numero} encontrado"
@@ -213,17 +506,16 @@ st.subheader(
 )
 
 st.write(
-    "Escriba el número del manifiesto "
-    "o una pregunta que contenga el número."
+    "Escriba una pregunta sobre un manifiesto."
 )
 
 consulta = st.text_input(
     "Consulta",
-    placeholder="Ejemplo: Consulta el manifiesto 0003947986"
+    placeholder="Ejemplo: ¿Cuál es la placa del manifiesto 0003947924?"
 )
 
 consultar = st.button(
-    "🔎 CONSULTAR MANIFIESTO",
+    "🔎 CONSULTAR",
     type="primary"
 )
 
@@ -236,11 +528,13 @@ if consultar:
 
     consulta_limpia = consulta.strip()
 
+
     if not consulta_limpia:
 
         st.warning(
             "⚠️ Escriba una consulta."
         )
+
 
     else:
 
@@ -248,28 +542,32 @@ if consultar:
             consulta_limpia
         )
 
+
         if not numero:
 
             st.warning(
-                "⚠️ No pude identificar un número "
-                "de manifiesto."
+                "⚠️ No pude identificar el número "
+                "del manifiesto."
             )
 
             st.info(
-                "Ejemplo: Consulta el manifiesto 0003947986"
+                "Ejemplo: ¿Cuál es la placa "
+                "del manifiesto 0003947924?"
             )
+
 
         else:
 
             try:
 
                 with st.spinner(
-                    f"Consultando manifiesto {numero} en Snowflake..."
+                    f"Consultando manifiesto {numero}..."
                 ):
 
                     df_manifiesto = consultar_manifiesto(
                         numero
                     )
+
 
                 if df_manifiesto.empty:
 
@@ -278,12 +576,19 @@ if consultar:
                         f"{numero} en Snowflake."
                     )
 
+
                 else:
 
-                    mostrar_respuesta_bot(
-                        df_manifiesto,
-                        numero
+                    tipo_consulta = identificar_consulta(
+                        consulta_limpia
                     )
+
+                    responder_consulta(
+                        df_manifiesto,
+                        numero,
+                        tipo_consulta
+                    )
+
 
             except KeyError as e:
 
@@ -296,10 +601,12 @@ if consultar:
                     f"Configuración faltante: `{e}`"
                 )
 
+
             except Exception as e:
 
                 st.error(
-                    "❌ Se presentó un error al consultar Snowflake."
+                    "❌ Se presentó un error "
+                    "al consultar Snowflake."
                 )
 
                 st.exception(e)
@@ -319,11 +626,11 @@ with st.expander(
     )
 
     st.write(
-        "Esta versión no vuelve a consultar el RNDC. "
-        "Utiliza la información que ya fue cargada en Snowflake."
+        "La búsqueda se realiza mediante "
+        "`NUMMANIFIESTOCARGA`."
     )
 
     st.write(
-        "La búsqueda se realiza mediante "
-        "`NUMMANIFIESTOCARGA`."
+        "Esta versión identifica la intención "
+        "de la pregunta mediante reglas."
     )
