@@ -84,7 +84,7 @@ def consultar_manifiesto(numero_manifiesto):
 
 
 # ============================================================
-# OBTENER VALOR DE UN CAMPO
+# OBTENER VALOR
 # ============================================================
 
 def obtener_valor(df, nombres):
@@ -111,7 +111,7 @@ def obtener_valor(df, nombres):
 
 
 # ============================================================
-# FORMATEAR VALOR DEL FLETE
+# FORMATEAR FLETE
 # ============================================================
 
 def formatear_flete(valor):
@@ -151,14 +151,19 @@ def extraer_numero(texto):
 
 
 # ============================================================
-# IDENTIFICAR QUÉ ESTÁ PREGUNTANDO EL USUARIO
+# IDENTIFICAR TODOS LOS DATOS SOLICITADOS
 # ============================================================
 
-def identificar_consulta(texto):
+def identificar_consultas(texto):
 
     texto = texto.lower()
 
+    consultas = []
+
+    # --------------------------------------------------------
     # PLACA
+    # --------------------------------------------------------
+
     if any(
         palabra in texto
         for palabra in [
@@ -168,10 +173,13 @@ def identificar_consulta(texto):
         ]
     ):
 
-        return "placa"
+        consultas.append("placa")
 
 
+    # --------------------------------------------------------
     # REMOLQUE
+    # --------------------------------------------------------
+
     if any(
         palabra in texto
         for palabra in [
@@ -181,24 +189,29 @@ def identificar_consulta(texto):
         ]
     ):
 
-        return "remolque"
+        consultas.append("remolque")
 
 
+    # --------------------------------------------------------
     # FLETE
+    # --------------------------------------------------------
+
     if any(
         palabra in texto
         for palabra in [
             "flete",
             "valor del flete",
-            "valorflete",
-            "valor"
+            "valorflete"
         ]
     ):
 
-        return "flete"
+        consultas.append("flete")
 
 
+    # --------------------------------------------------------
     # ORIGEN
+    # --------------------------------------------------------
+
     if any(
         palabra in texto
         for palabra in [
@@ -208,10 +221,13 @@ def identificar_consulta(texto):
         ]
     ):
 
-        return "origen"
+        consultas.append("origen")
 
 
+    # --------------------------------------------------------
     # DESTINO
+    # --------------------------------------------------------
+
     if any(
         palabra in texto
         for palabra in [
@@ -221,23 +237,28 @@ def identificar_consulta(texto):
         ]
     ):
 
-        return "destino"
+        consultas.append("destino")
 
 
+    # --------------------------------------------------------
     # CONDUCTOR
+    # --------------------------------------------------------
+
     if any(
         palabra in texto
         for palabra in [
             "conductor",
-            "chofer",
-            "transportador"
+            "chofer"
         ]
     ):
 
-        return "conductor"
+        consultas.append("conductor")
 
 
+    # --------------------------------------------------------
     # FECHA
+    # --------------------------------------------------------
+
     if any(
         palabra in texto
         for palabra in [
@@ -247,86 +268,68 @@ def identificar_consulta(texto):
         ]
     ):
 
-        return "fecha"
-
-
-    # RESUMEN GENERAL
-    return "resumen"
-
-
-# ============================================================
-# RESPUESTA SEGÚN LA PREGUNTA
-# ============================================================
-
-def responder_consulta(df, numero, tipo):
+        consultas.append("fecha")
 
 
     # --------------------------------------------------------
-    # PLACA
+    # SI NO PIDIÓ UN CAMPO ESPECÍFICO
     # --------------------------------------------------------
+
+    if not consultas:
+
+        consultas.append("resumen")
+
+
+    return consultas
+
+
+# ============================================================
+# MOSTRAR UN CAMPO
+# ============================================================
+
+def mostrar_campo(df, numero, tipo):
 
     if tipo == "placa":
 
-        placa = obtener_valor(
+        valor = obtener_valor(
             df,
             ["NUMPLACA"]
         )
 
-        st.success(
-            f"🚛 La placa del manifiesto "
-            f"{numero} es **{placa}**."
+        st.markdown(
+            f"🚛 **Placa:** {valor}"
         )
 
-        return
 
+    elif tipo == "remolque":
 
-    # --------------------------------------------------------
-    # REMOLQUE
-    # --------------------------------------------------------
-
-    if tipo == "remolque":
-
-        remolque = obtener_valor(
+        valor = obtener_valor(
             df,
             ["NUMPLACAREMOLQUE"]
         )
 
-        st.success(
-            f"🚚 El remolque del manifiesto "
-            f"{numero} es **{remolque}**."
+        st.markdown(
+            f"🚚 **Remolque:** {valor}"
         )
 
-        return
 
+    elif tipo == "flete":
 
-    # --------------------------------------------------------
-    # FLETE
-    # --------------------------------------------------------
-
-    if tipo == "flete":
-
-        flete = obtener_valor(
+        valor = obtener_valor(
             df,
             ["VALORFLETEPACTADOVIAJE"]
         )
 
-        flete = formatear_flete(flete)
+        valor = formatear_flete(valor)
 
-        st.success(
-            f"💰 El valor del flete del manifiesto "
-            f"{numero} es **{flete}**."
+        st.markdown(
+            f"💰 **Valor del flete:** {valor}"
         )
 
-        return
 
+    elif tipo == "origen":
 
-    # --------------------------------------------------------
-    # ORIGEN
-    # --------------------------------------------------------
-
-    if tipo == "origen":
-
-        origen = obtener_valor(
+        valor = obtener_valor(
             df,
             [
                 "CODMUNICIPIOORIGENMANIFIESTO",
@@ -334,21 +337,14 @@ def responder_consulta(df, numero, tipo):
             ]
         )
 
-        st.success(
-            f"📍 El origen del manifiesto "
-            f"{numero} es **{origen}**."
+        st.markdown(
+            f"📍 **Origen:** {valor}"
         )
 
-        return
 
+    elif tipo == "destino":
 
-    # --------------------------------------------------------
-    # DESTINO
-    # --------------------------------------------------------
-
-    if tipo == "destino":
-
-        destino = obtener_valor(
+        valor = obtener_valor(
             df,
             [
                 "CODMUNICIPIODESTINOMANIFIESTO",
@@ -356,21 +352,14 @@ def responder_consulta(df, numero, tipo):
             ]
         )
 
-        st.success(
-            f"📍 El destino del manifiesto "
-            f"{numero} es **{destino}**."
+        st.markdown(
+            f"📍 **Destino:** {valor}"
         )
 
-        return
 
+    elif tipo == "conductor":
 
-    # --------------------------------------------------------
-    # CONDUCTOR
-    # --------------------------------------------------------
-
-    if tipo == "conductor":
-
-        conductor = obtener_valor(
+        valor = obtener_valor(
             df,
             [
                 "NUMIDCONDUCTOR",
@@ -378,21 +367,14 @@ def responder_consulta(df, numero, tipo):
             ]
         )
 
-        st.success(
-            f"👤 El conductor del manifiesto "
-            f"{numero} es **{conductor}**."
+        st.markdown(
+            f"👤 **Conductor:** {valor}"
         )
 
-        return
 
+    elif tipo == "fecha":
 
-    # --------------------------------------------------------
-    # FECHA
-    # --------------------------------------------------------
-
-    if tipo == "fecha":
-
-        fecha = obtener_valor(
+        valor = obtener_valor(
             df,
             [
                 "FECHAING",
@@ -400,17 +382,16 @@ def responder_consulta(df, numero, tipo):
             ]
         )
 
-        st.success(
-            f"📅 La fecha del manifiesto "
-            f"{numero} es **{fecha}**."
+        st.markdown(
+            f"📅 **Fecha:** {valor}"
         )
 
-        return
 
+# ============================================================
+# MOSTRAR RESUMEN
+# ============================================================
 
-    # ========================================================
-    # RESUMEN GENERAL
-    # ========================================================
+def mostrar_resumen(df, numero):
 
     fecha = obtener_valor(
         df,
@@ -461,14 +442,9 @@ def responder_consulta(df, numero, tipo):
 
     flete = formatear_flete(flete)
 
-
-    st.success(
-        f"✅ Manifiesto {numero} encontrado"
-    )
-
     st.markdown(
         f"""
-## 🤖 Información del manifiesto
+### 🤖 Información del manifiesto
 
 **Número:** `{numero}`
 
@@ -485,7 +461,7 @@ def responder_consulta(df, numero, tipo):
     )
 
     with st.expander(
-        "📊 Ver información completa del manifiesto"
+        "📊 Ver información completa"
     ):
 
         st.dataframe(
@@ -511,7 +487,7 @@ st.write(
 
 consulta = st.text_input(
     "Consulta",
-    placeholder="Ejemplo: ¿Cuál es la placa del manifiesto 0003947924?"
+    placeholder="Ejemplo: Dame la placa y el valor del flete del manifiesto 0003947924"
 )
 
 consultar = st.button(
@@ -550,11 +526,6 @@ if consultar:
                 "del manifiesto."
             )
 
-            st.info(
-                "Ejemplo: ¿Cuál es la placa "
-                "del manifiesto 0003947924?"
-            )
-
 
         else:
 
@@ -579,15 +550,55 @@ if consultar:
 
                 else:
 
-                    tipo_consulta = identificar_consulta(
+                    st.success(
+                        f"✅ Manifiesto {numero} encontrado"
+                    )
+
+                    tipos_consulta = identificar_consultas(
                         consulta_limpia
                     )
 
-                    responder_consulta(
-                        df_manifiesto,
-                        numero,
-                        tipo_consulta
-                    )
+
+                    # ========================================
+                    # RESUMEN
+                    # ========================================
+
+                    if "resumen" in tipos_consulta:
+
+                        mostrar_resumen(
+                            df_manifiesto,
+                            numero
+                        )
+
+
+                    # ========================================
+                    # UNO O VARIOS CAMPOS
+                    # ========================================
+
+                    else:
+
+                        st.markdown(
+                            "### 🤖 Respuesta"
+                        )
+
+                        for tipo in tipos_consulta:
+
+                            mostrar_campo(
+                                df_manifiesto,
+                                numero,
+                                tipo
+                            )
+
+
+                        with st.expander(
+                            "📊 Ver información completa"
+                        ):
+
+                            st.dataframe(
+                                df_manifiesto,
+                                use_container_width=True,
+                                hide_index=True
+                            )
 
 
             except KeyError as e:
@@ -631,6 +642,6 @@ with st.expander(
     )
 
     st.write(
-        "Esta versión identifica la intención "
-        "de la pregunta mediante reglas."
+        "Esta versión permite solicitar uno o varios "
+        "campos en una misma pregunta."
     )
