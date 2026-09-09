@@ -515,6 +515,49 @@ xmlns:m="urn:BPMServicesIntf-IBPMServices">
 
 
 # =============================================================================
+# CONSULTAR UN MANIFIESTO EN SNOWFLAKE
+# SOLO CONSULTA - NO MODIFICA LOS DATOS
+# =============================================================================
+
+def consultar_manifiesto_snowflake(numero_manifiesto):
+
+    conexion = None
+
+    try:
+
+        conexion = conectar_snowflake()
+        cursor = conexion.cursor()
+
+        sql = f"""
+        SELECT *
+        FROM {SNOWFLAKE_DATABASE}.{SNOWFLAKE_SCHEMA}.{SNOWFLAKE_TABLE}
+        WHERE TRIM(NUMMANIFIESTOCARGA) = %s
+        """
+
+        cursor.execute(
+            sql,
+            (str(numero_manifiesto).strip(),)
+        )
+
+        columnas = [
+            descripcion[0]
+            for descripcion in cursor.description
+        ]
+
+        registros = cursor.fetchall()
+
+        return pd.DataFrame(
+            registros,
+            columns=columnas
+        )
+
+    finally:
+
+        if conexion is not None:
+            conexion.close()
+
+
+# =============================================================================
 # EXTRAER FECHA DE FECHAING
 # =============================================================================
 
@@ -1336,6 +1379,76 @@ if secrets_faltantes:
 
 
     st.stop()
+
+
+# =============================================================================
+# CONSULTA POR NÚMERO DE MANIFIESTO
+# =============================================================================
+
+st.subheader("🔎 Consulta por número de manifiesto")
+
+st.write(
+    "Consulta un manifiesto que ya se encuentre cargado en Snowflake."
+)
+
+numero_manifiesto = st.text_input(
+    "Número de manifiesto",
+    placeholder="Ingrese el número de manifiesto"
+)
+
+boton_consultar_manifiesto = st.button(
+    "🔎 CONSULTAR MANIFIESTO"
+)
+
+if boton_consultar_manifiesto:
+
+    if not numero_manifiesto.strip():
+
+        st.warning(
+            "⚠️ Ingrese un número de manifiesto."
+        )
+
+    else:
+
+        try:
+
+            with st.spinner(
+                "Consultando manifiesto en Snowflake..."
+            ):
+
+                df_manifiesto = consultar_manifiesto_snowflake(
+                    numero_manifiesto
+                )
+
+            if df_manifiesto.empty:
+
+                st.warning(
+                    f"⚠️ No se encontró información para el manifiesto "
+                    f"{numero_manifiesto.strip()}."
+                )
+
+            else:
+
+                st.success(
+                    f"✅ Se encontró información para el manifiesto "
+                    f"{numero_manifiesto.strip()}."
+                )
+
+                st.dataframe(
+                    df_manifiesto,
+                    use_container_width=True
+                )
+
+        except Exception as e:
+
+            st.error(
+                "❌ Ocurrió un error al consultar el manifiesto."
+            )
+
+            st.exception(e)
+
+
+st.divider()
 
 
 # =============================================================================
